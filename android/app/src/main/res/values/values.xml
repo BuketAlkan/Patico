@@ -1,0 +1,9 @@
+<resources>
+    <!-- Firebase Project Information -->
+    <string name="google_app_id">1:967348865143:android:75c16c8ae30e3126c89e72</string>
+    <string name="google_api_key">AIzaSyAkoBQnD55jIAvda-USYsuhParUlmNMaA8</string>
+    <string name="firebase_database_url">https://patico-9a120.firebaseio.com</string>
+    <string name="gcm_defaultSenderId">967348865143</string>
+    <string name="google_storage_bucket">patico-9a120.firebasestorage.app</string>
+    <string name="project_id">patico-9a120</string>
+</resources>

@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "967348865143",
+    "project_id": "patico-9a120",
+    "storage_bucket": "patico-9a120.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:967348865143:android:75c16c8ae30e3126c89e72",
+        "android_client_info": {
+          "package_name": "com.example.patico"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAkoBQnD55jIAvda-USYsuhParUlmNMaA8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
