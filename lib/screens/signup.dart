@@ -19,6 +19,8 @@ class _SignupScreenState extends State<SignupScreen> {
   final TextEditingController emailController = TextEditingController();
   final TextEditingController passwordController = TextEditingController();
   final TextEditingController phoneController = TextEditingController();
+  final TextEditingController confirmPasswordController = TextEditingController();  // Yeni controller
+
   bool isLoading = false;
 
   @override
@@ -26,7 +28,8 @@ class _SignupScreenState extends State<SignupScreen> {
     super.dispose();
     emailController.dispose();
     passwordController.dispose();
-    nameController.dispose();
+   nameController.dispose();
+    confirmPasswordController.dispose();
   }
 
   void signupUser() async {
@@ -34,11 +37,19 @@ class _SignupScreenState extends State<SignupScreen> {
     setState(() {
       isLoading = true;
     });
+    if (passwordController.text != confirmPasswordController.text) {
+      setState(() {
+        isLoading = false;
+      });
+      showSnackBar(context, "Passwords do not match.");
+      return;
+    }
     // signup user using our authmethod
     String res = await AuthMethod().signupUser(
         email: emailController.text,
         password: passwordController.text,
-        name: nameController.text);
+        name: nameController.text,
+      phone: phoneController.text,);
     // if string return is success, user has been creaded and navigate to next screen other withse show error.
     if (res == "success") {
       setState(() {
@@ -95,6 +106,13 @@ class _SignupScreenState extends State<SignupScreen> {
                   hintText: 'Enter your password',
                   textInputType: TextInputType.text,
                   isPass: true,
+                ),
+                  TextFieldInput(
+                    icon: Icons.lock,
+                    textEditingController: confirmPasswordController,  // Yeni şifre doğrulama alanı
+                    hintText: 'Confirm your password',
+                    textInputType: TextInputType.text,
+                    isPass: true,
                 ),
                 MyButtons(onTap: signupUser, text: "Sign Up"),
                 const SizedBox(height: 50),

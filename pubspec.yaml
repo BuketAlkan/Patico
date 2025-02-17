@@ -36,6 +36,7 @@ dependencies:
   # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.2
   firebase_core:
+  firebase_storage:
   firebase_auth:
   firebase_messaging:
   flutter_local_notifications:
@@ -47,7 +48,10 @@ dependencies:
   flutter_svg: ^2.0.0
   glassmorphism_ui: ^0.2.0
   firebase_analytics:
-
+  geocoding: ^2.0.6
+  geolocator:
+  flutter_riverpod:
+  image_picker:
 
 dev_dependencies:
   flutter_test:
