@@ -50,15 +50,20 @@ class _CreateAdPageState extends ConsumerState<CreateAdPage> {
     }
 
     final user = FirebaseAuth.instance.currentUser;
-    final userId = user?.uid ?? 'guest';
+    if (user == null) return;
+    final userId = user.uid;
     final adType = ref.read(adTypeProvider);
+
+    DocumentSnapshot userDoc =
+    await FirebaseFirestore.instance.collection('users').doc(userId).get();
+    String userName = userDoc.exists ? userDoc['name'] : 'Anonim';
 
     await FirebaseFirestore.instance.collection(adType).add({
       'title': _titleController.text,
       'description': _descriptionController.text,
       'price': adType == 'Bakım' ? _priceController.text : null,
       'userId': userId,
-      'userName': user?.displayName ?? 'Anonim',
+      'userName': userName,
       'imageUrl': imageUrl,
       'createdAt': Timestamp.now(),
     });

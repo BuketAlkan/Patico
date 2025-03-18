@@ -17,6 +17,8 @@ import 'package:patico/widget/notification_modal.dart';
 import 'package:patico/services/notification_services.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:patico/screens/ad_page.dart';
+import 'package:patico/screens/morepetspage.dart';
+import 'package:patico/screens/favorites_page.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({Key? key}) : super(key: key);
@@ -207,7 +209,7 @@ class _HomePageState extends State<HomePage> {
              Navigator.push(context, MaterialPageRoute(builder: (context) => ProfilePage()));
           }),
           _buildDrawerItem(Icons.favorite, "Favorilerim", () {
-            //Navigator.push(context, MaterialPageRoute(builder: (context) => FavoritesPage()));
+            Navigator.push(context, MaterialPageRoute(builder: (context) => FavoritesPage()));
           }),
           _buildDrawerItem(Icons.forum, "Forum", () {
             // Navigator.push(context, MaterialPageRoute(builder: (context) => ForumPage()));
@@ -308,6 +310,9 @@ class _HomePageState extends State<HomePage> {
 
   /// Hayvanların olduğu bölümü oluşturur
   Widget _buildSectionWithPets(String title) {
+    // Firestore'daki koleksiyon adları ile eşleşen formatta bir değişken oluşturalım
+    String collectionName = title.contains("Bakım") ? "Bakım" : "Sahiplenme";
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -325,11 +330,18 @@ class _HomePageState extends State<HomePage> {
                 ),
               ),
               ElevatedButton(
-                onPressed: () {},
+                onPressed: () {
+                  print("Seçilen koleksiyon: $collectionName"); // Debugging için
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => MorePetsPage(type: collectionName),
+                    ),
+                  );
+                },
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppColor.primary,
-                  padding:
-                  const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(20),
                   ),
@@ -345,6 +357,8 @@ class _HomePageState extends State<HomePage> {
             ],
           ),
         ),
+
+        // Carousel Slider buraya düzgün şekilde yerleştirildi
         CarouselSlider(
           options: CarouselOptions(
             height: 400,
@@ -366,9 +380,10 @@ class _HomePageState extends State<HomePage> {
             ),
           ),
         ),
-      ],
+      ], // children listesi burada düzgün kapanıyor
     );
   }
+
 
   /// Kategori seçimi için widget
   /*Widget _buildCategories() {
@@ -431,3 +446,5 @@ class _HomePageState extends State<HomePage> {
     );
   }
 }
+
+

@@ -1,3 +1,7 @@
+import 'dart:async';
+
+import 'dart:core';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
@@ -14,7 +18,7 @@ class AuthMethod {
   final ImagePicker _picker = ImagePicker();
 
   // Konum bilgisi almak için fonksiyon
-  Future<Position> getCurrentLocation() async {
+    Future<Position> getCurrentLocation() async {
     bool serviceEnabled;
     LocationPermission permission;
 
@@ -39,7 +43,7 @@ class AuthMethod {
 
   // OpenCage API kullanarak enlem ve boylamdan şehir bilgisi alma
   Future<String> getCityFromCoordinates(double latitude, double longitude) async {
-    final apiKey = '837dfb141a814026a1e86a65579fdf35';  // OpenCage API anahtarınızı buraya ekleyin
+    final apiKey = '63f9fc38e4ac4abca4fe10c374d89e18';  // OpenCage API anahtarınızı buraya ekleyin
     final url = 'https://api.opencagedata.com/geocode/v1/json?q=$latitude+$longitude&key=$apiKey';
 
     final response = await http.get(Uri.parse(url));
@@ -72,7 +76,7 @@ class AuthMethod {
         Position position = await getCurrentLocation();
 
         // Konumdan şehir bilgisini al
-        String city = await getCityFromCoordinates(position.latitude, position.longitude);
+       String city = await getCityFromCoordinates(position.latitude, position.longitude);
  //String photoURL= await uploadProfilePicture(cred.user!.uid) ;
         // Kullanıcıyı Firestore'a ekle
         await _firestore.collection("users").doc(cred.user!.uid).set({
