@@ -1,108 +1,97 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_svg/flutter_svg.dart';
-import 'package:patico/widget/notification_modal.dart';
 
 class NotificationBox extends StatefulWidget {
-  const NotificationBox({
-    Key? key,
-    required this.notifications, // Bildirim listesi
-    this.onTap,
-    this.notifiedNumber = 0,
-  }) : super(key: key);
-
-  final GestureTapCallback? onTap;
-  final int notifiedNumber;
-  final List<String> notifications; // Bildirim listesi
+  const NotificationBox({super.key});
 
   @override
-  _NotificationBoxState createState() => _NotificationBoxState();
+  State<NotificationBox> createState() => _NotificationBoxState();
 }
 
 class _NotificationBoxState extends State<NotificationBox> {
-  late int _notifiedNumber;
+  final userId = FirebaseAuth.instance.currentUser?.uid;
+  final notificationsRef = FirebaseFirestore.instance.collection('notifications');
 
-  @override
-  void initState() {
-    super.initState();
-    // Bildirim sayısını widget.notifiedNumber'dan başlatıyoruz
-    _notifiedNumber = widget.notifiedNumber > 0 ? widget.notifiedNumber : widget.notifications.length;
+  Future<void> _markAsRead(String docId) async {
+    await notificationsRef.doc(docId).update({'isRead': true});
   }
 
-  // Alttan kayan modalı açan fonksiyon
-  void _showNotificationModal(BuildContext context) {
-    showModalBottomSheet(
-      context: context,
-      builder: (BuildContext context) {
-        return NotificationModal(
-          notifications: widget.notifications,
-          onNotificationRemoved: _removeNotification, // Bildirim silme fonksiyonu ekledik
-        );
-      },
-    );
+  Future<void> _deleteNotification(String docId) async {
+    await notificationsRef.doc(docId).delete();
   }
 
-  // Bildirim sayısını sıfırlama
-  void _resetNotificationCount() {
-    setState(() {
-      _notifiedNumber = widget.notifications.length;
-    });
-  }
-
-  // Bildirim silme işlemi
-  void _removeNotification(int index) {
-    setState(() {
-      widget.notifications.removeAt(index); // Listeden bildirimi sil
-      _notifiedNumber = widget.notifications.length; // Bildirim sayısını güncelle
-    });
+  Future<void> _clearAllNotifications() async {
+    final snapshot = await notificationsRef.where('toUserId', isEqualTo: userId).get();
+    for (var doc in snapshot.docs) {
+      await doc.reference.delete();
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: () {
-        // Bildirim kutusuna tıklandığında sadece alttan kayan modal'ı aç
-        _showNotificationModal(context);
-
-        // Bildirim sayısını sıfırlama işlemi
-        _resetNotificationCount();
-
-        // Ekstra onTap fonksiyonu varsa çalıştır
-        widget.onTap?.call(); // null kontrolü ile onTap fonksiyonunu çağırma
-      },
-      child: Container(
-        padding: EdgeInsets.all(5),
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          color: Colors.white, // AppColor.appBarColor
-          border: Border.all(color: Colors.grey.withOpacity(.3)),
-        ),
-        child: Stack(
-          alignment: Alignment.center, // Stack öğelerini merkeze hizalar
-          children: [
-            SvgPicture.asset(
-              "assets/bell.svg", // Bildirim simgesi
-              width: 25,
-              height: 25,
-            ),
-            // Eğer bildirim varsa, bildirim sayısını gösterecek yuvarlak bir kutu
-            if (_notifiedNumber > 0) // 0'dan büyükse göster
-              Positioned(
-                right: -5, // Konumu ayarlayın, böylece simgenin dışına taşar
-                top: -5, // Bildirim sayısı simgenin üstünde biraz taşsın
-                child: Container(
-                  padding: EdgeInsets.all(6),  // Padding'i artırarak sayı görünürlüğünü kontrol et
-                  decoration: BoxDecoration(
-                    color: Colors.red,
-                    shape: BoxShape.circle,
-                  ),
-                  child: Text(
-                    _notifiedNumber.toString(),
-                    style: TextStyle(color: Colors.white, fontSize: 14),  // Font boyutunu biraz artır
-                  ),
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Bildirimler'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.cleaning_services),
+            onPressed: () async {
+              final confirm = await showDialog(
+                context: context,
+                builder: (ctx) => AlertDialog(
+                  title: const Text("Tümünü sil"),
+                  content: const Text("Tüm bildirimleri silmek istediğine emin misin?"),
+                  actions: [
+                    TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text("İptal")),
+                    TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text("Sil")),
+                  ],
                 ),
-              ),
-          ],
-        ),
+              );
+              if (confirm == true) {
+                await _clearAllNotifications();
+              }
+            },
+          )
+        ],
+      ),
+      body: StreamBuilder<QuerySnapshot>(
+        stream: notificationsRef
+            .where('toUserId', isEqualTo: userId)
+            .orderBy('timestamp', descending: true)
+            .snapshots(),
+        builder: (context, snapshot) {
+          if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+
+          final notifications = snapshot.data!.docs;
+
+          if (notifications.isEmpty) {
+            return const Center(child: Text("Hiç bildirimin yok 🐾"));
+          }
+
+          return ListView.builder(
+            itemCount: notifications.length,
+            itemBuilder: (context, index) {
+              final data = notifications[index].data() as Map<String, dynamic>;
+              final docId = notifications[index].id;
+              final isRead = data['isRead'] ?? false;
+
+              return ListTile(
+                leading: Icon(Icons.notifications, color: isRead ? Colors.grey : Colors.pink),
+                title: Text(data['message'] ?? 'Yeni bildirim'),
+                subtitle: Text(
+                  (data['timestamp'] as Timestamp?)?.toDate().toLocal().toString().substring(0, 16) ?? '',
+                ),
+                tileColor: isRead ? Colors.grey[200] : Colors.pink[50],
+                onTap: () => _markAsRead(docId),
+                trailing: IconButton(
+                  icon: const Icon(Icons.delete, color: Colors.redAccent),
+                  onPressed: () => _deleteNotification(docId),
+                ),
+              );
+            },
+          );
+        },
       ),
     );
   }

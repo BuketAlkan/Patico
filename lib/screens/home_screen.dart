@@ -4,6 +4,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:geocoding/geocoding.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:patico/screens/forum_page.dart';
 import 'package:patico/screens/login.dart';
 import 'package:patico/screens/profile_page.dart';
 import 'package:patico/screens/settings_page.dart';
@@ -182,6 +183,9 @@ class _HomePageState extends State<HomePage> {
           _buildDrawerItem(Icons.favorite, "Favorilerim", () {
             Navigator.push(context, MaterialPageRoute(builder: (context) =>  FavoritesPage()));
           }),
+          _buildDrawerItem(Icons.mode_comment_rounded, "Forum", () {
+            Navigator.push(context, MaterialPageRoute(builder: (context) => const ForumPage()));
+          }),
           const Spacer(),
           const Divider(),
           _buildDrawerItem(Icons.logout, "Çıkış Yap", () async {
@@ -239,7 +243,7 @@ class _HomeContent extends StatelessWidget {
 
   Widget _buildAppBar() {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 10.0),
+      padding: const EdgeInsets.symmetric(vertical: 10.0, horizontal: 16),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
@@ -270,14 +274,56 @@ class _HomeContent extends StatelessWidget {
               ),
             ],
           ),
-          NotificationBox(
-            notifications: notifications,
-            notifiedNumber: notifiedCount,
-          )
+          StreamBuilder<QuerySnapshot>(
+            stream: FirebaseFirestore.instance
+                .collection('notifications')
+                .where('toUserId', isEqualTo: FirebaseAuth.instance.currentUser?.uid)
+                .where('isRead', isEqualTo: false)
+                .snapshots(),
+            builder: (context, snapshot) {
+              int unreadCount = snapshot.data?.docs.length ?? 0;
+
+              return GestureDetector(
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (context) => const NotificationBox()),
+                  );
+                },
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    const Icon(Icons.notifications_none, size: 28, color: Colors.black),
+                    if (unreadCount > 0)
+                      Positioned(
+                        right: 0,
+                        top: 5,
+                        child: Container(
+                          padding: const EdgeInsets.all(4),
+                          decoration: const BoxDecoration(
+                            color: Colors.red,
+                            shape: BoxShape.circle,
+                          ),
+                          child: Text(
+                            unreadCount.toString(),
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              );
+            },
+          ),
         ],
       ),
     );
   }
+
 
   Widget _buildBody(BuildContext context) {
     return SingleChildScrollView(
