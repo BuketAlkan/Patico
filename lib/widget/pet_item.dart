@@ -1,176 +1,82 @@
-
 import 'package:flutter/material.dart';
-import 'package:glassmorphism_ui/glassmorphism_ui.dart';
-import 'package:patico/theme/colors.dart';
-import 'package:patico/widget/favorite_box.dart';
-
-import 'custom_image.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 class PetItem extends StatelessWidget {
-  const PetItem(
-      {Key? key,
-        required this.data,
-        this.width = 350,
-        this.height = 400,
-        this.radius = 40,
-        this.onTap,
-        this.onFavoriteTap})
-      : super(key: key);
-  final data;
+  final Map<String, dynamic> data;
   final double width;
-  final double height;
-  final double radius;
-  final GestureTapCallback? onTap;
-  final GestureTapCallback? onFavoriteTap;
+  final VoidCallback? onTap;
+  final VoidCallback? onFavoriteTap;
+
+  const PetItem({
+    super.key,
+    required this.data,
+    required this.width,
+    this.onTap,
+    this.onFavoriteTap,
+  });
 
   @override
   Widget build(BuildContext context) {
+    final imageUrl = data['imageUrl'] ?? '';
+    final title = data['title'] ?? 'İsimsiz İlan';
+    final description = data['description'] ?? 'Açıklama yok';
+    final username = data['username'] ?? 'Kullanıcı';
+    final petId = data['petId']; // İlanın benzersiz ID'si
+
     return GestureDetector(
       onTap: onTap,
-      child: Container(
-        width: width,
-        height: height,
-        margin: EdgeInsets.fromLTRB(0, 0, 0, 10),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(radius),
-        ),
-        child: Stack(
-          children: [
-            _buildImage(),
-            Positioned(
-              bottom: 0,
-              child: _buildInfoGlass(),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildInfoGlass() {
-    return GlassContainer(
-      borderRadius: BorderRadius.circular(25),
-      blur: 10,
-      opacity: 0.15,
-      child: Container(
-        width: width,
-        height: 110,
-        padding: EdgeInsets.fromLTRB(15, 10, 15, 10),
-        decoration: BoxDecoration(
-          color: Colors.transparent,
-          borderRadius: BorderRadius.circular(25),
-          boxShadow: [
-            BoxShadow(
-              color: AppColor.shadowColor.withOpacity(0.1),
-              spreadRadius: 1,
-              blurRadius: 1,
-              offset: Offset(0, 2), // changes position of shadow
-            ),
-          ],
-        ),
+      child: Card(
+        margin: const EdgeInsets.symmetric(horizontal: 8),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        elevation: 4,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _buildInfo(),
-            SizedBox(
-              height: 5,
+            // Resim alanı
+            ClipRRect(
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+              child: imageUrl.isNotEmpty
+                  ? Image.network(imageUrl, width: width, height: 200, fit: BoxFit.cover)
+                  : Container(
+                width: width,
+                height: 200,
+                color: Colors.grey[300],
+                child: const Icon(Icons.image_not_supported, size: 60, color: Colors.grey),
+              ),
             ),
-            _buildLocation(),
-            SizedBox(
-              height: 15,
+
+            // Metin alanları
+            Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title,
+                      style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 4),
+                  Text(description, maxLines: 2, overflow: TextOverflow.ellipsis),
+                  const SizedBox(height: 8),
+                  Text("İlan sahibi: $username",
+                      style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                  Align(
+                    alignment: Alignment.bottomRight,
+                    child: IconButton(
+                      icon: Icon(
+                        // Favoriye eklenip eklenmediğini kontrol et
+                        Icons.favorite_border, // Varsayılan favori ikonu
+                        color: Colors.red, // Favoriye ekli ise kırmızı olabilir
+                      ),
+                      onPressed: () {
+                        onFavoriteTap?.call(); // Favoriye ekleme fonksiyonu çalıştırılıyor
+                      },
+                    ),
+                  ),
+                ],
+              ),
             ),
-            _buildAttributes(),
           ],
         ),
       ),
-    );
-  }
-
-  Widget _buildLocation() {
-    return Text(
-      data["location"],
-      maxLines: 1,
-      overflow: TextOverflow.ellipsis,
-      style: TextStyle(
-        color: AppColor.glassLabelColor,
-        fontSize: 13,
-      ),
-    );
-  }
-
-  Widget _buildInfo() {
-    return Row(
-      children: [
-        Expanded(
-          child: Text(
-            data["name"],
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              color: AppColor.glassTextColor,
-              fontSize: 18,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ),
-        FavoriteBox(
-          isFavorited: data["is_favorited"],
-          onTap: onFavoriteTap,
-        )
-      ],
-    );
-  }
-
-  Widget _buildImage() {
-    return CustomImage(
-      data["image"],
-      borderRadius: BorderRadius.vertical(
-        top: Radius.circular(radius),
-        bottom: Radius.zero,
-      ),
-      isShadow: false,
-      width: width,
-      height: 350,
-    );
-  }
-
-  Widget _buildAttributes() {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceAround,
-      children: [
-        _getAttribute(
-          Icons.transgender,
-          data["sex"],
-        ),
-        _getAttribute(
-          Icons.color_lens_outlined,
-          data["color"],
-        ),
-        _getAttribute(
-          Icons.query_builder,
-          data["age"],
-        ),
-      ],
-    );
-  }
-
-  Widget _getAttribute(IconData icon, String info) {
-    return Row(
-      children: [
-        Icon(
-          icon,
-          size: 18,
-        ),
-        SizedBox(
-          width: 3,
-        ),
-        Text(
-          info,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(color: AppColor.textColor, fontSize: 13),
-        ),
-      ],
     );
   }
 }

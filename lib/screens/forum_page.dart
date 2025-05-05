@@ -6,7 +6,8 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
 class ForumPage extends StatefulWidget {
-  const ForumPage({super.key});
+  final String? postId;
+  const ForumPage({super.key,this.postId});
 
   @override
   State<ForumPage> createState() => _ForumPageState();
@@ -62,9 +63,12 @@ class _ForumPageState extends State<ForumPage> {
   Future<void> _addComment(String postId, String postOwnerId, String commentText) async {
     try {
       final user = FirebaseAuth.instance.currentUser;
-      if (user == null || commentText.trim().isEmpty) return;
+      if (user == null || commentText
+          .trim()
+          .isEmpty) return;
 
-      final userDoc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
+      final userDoc = await FirebaseFirestore.instance.collection('users').doc(
+          user.uid).get();
       final username = userDoc.data()?['name'] ?? 'Kullanıcı';
       final profilePicture = userDoc.data()?['profilePicture'] ?? '';
 
@@ -81,24 +85,32 @@ class _ForumPageState extends State<ForumPage> {
       });
 
       if (postOwnerId != user.uid) {
-        await _sendNotification(postOwnerId, user.uid, commentText);
+        await _sendNotification(postOwnerId, user.uid, commentText,postId);
       }
+
     } catch (e) {
       print("Yorum eklenirken hata oluştu: $e");
     }
   }
 
-  Future<void> _sendNotification(String postOwnerId, String userId, String commentText) async {
-    if (postOwnerId != userId) {
-      await FirebaseFirestore.instance.collection('notifications').add({
-        'userId': postOwnerId,
-        'senderId': userId,
-        'comment': commentText,
-        'timestamp': Timestamp.now(),
-        'read': false,
-      });
-    }
+  Future<void> _sendNotification(String postOwnerId, String senderId, String commentText, String postId) async {
+    if (postOwnerId == senderId) return;
+
+    final senderDoc = await FirebaseFirestore.instance.collection('users').doc(senderId).get();
+    final senderName = senderDoc.data()?['name'] ?? 'Bilinmeyen';
+
+    await FirebaseFirestore.instance.collection('notifications').add({
+      'toUserId': postOwnerId,
+      'senderId': senderId,
+      'senderName': senderName,
+      'type': 'comment',
+      'content': commentText,
+      'relatedId': postId,
+      'timestamp': Timestamp.now(),
+      'isRead': false,
+    });
   }
+
 
   @override
   Widget build(BuildContext context) {
@@ -111,108 +123,108 @@ class _ForumPageState extends State<ForumPage> {
       body: Column(
         children: [
           Padding(
-              padding: const EdgeInsets.all(12),
-              child: Column(
-                children: [
-              Row(
+            padding: const EdgeInsets.all(12),
+            child: Column(
               children: [
-              Expanded(
-              child: TextField(
-                controller: _questionController,
-                decoration: const InputDecoration(
-                  hintText: 'Bir soru sor...',
-                  filled: true,
-                  fillColor: Colors.white,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.all(Radius.circular(20)),
-                  ),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _questionController,
+                        decoration: const InputDecoration(
+                          hintText: 'Bir soru sor...',
+                          filled: true,
+                          fillColor: Colors.white,
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.all(Radius.circular(20)),
+                          ),
+                        ),
+                      ), // TextField'ın kapanışı
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.photo),
+                      onPressed: _pickImage,
+                    ),
+                    ElevatedButton.icon(
+                      onPressed: _postQuestion,
+                      icon: const Icon(Icons.pets),
+                      label: const Text('Paylaş'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFFFFB6C1),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                      ),
+                    ), // ElevatedButton.icon kapanışı
+                  ],
                 ),
-              ), // TextField'ın kapanışı
-          ),
-          IconButton(
-            icon: const Icon(Icons.photo),
-            onPressed: _pickImage,
-          ),
-          ElevatedButton.icon(
-            onPressed: _postQuestion,
-            icon: const Icon(Icons.pets),
-            label: const Text('Paylaş'),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFFFB6C1),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(20),
-              ),
+
+                if (_selectedImage != null)
+                  Padding(
+                    padding: const EdgeInsets.all(8.0),
+                    child: Image.file(_selectedImage!, height: 100),
+                  ),
+              ],
             ),
-          ), // ElevatedButton.icon kapanışı
-        ],
-      ),
+          ),
+          Expanded(
+            child: StreamBuilder<QuerySnapshot>(
+              stream: _firestore.collection('forumPosts').orderBy('timestamp', descending: true).snapshots(),
+              builder: (context, snapshot) {
+                if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+                final posts = snapshot.data!.docs;
 
-              if (_selectedImage != null)
-          Padding(
-            padding: const EdgeInsets.all(8.0),
-            child: Image.file(_selectedImage!, height: 100),
+                return ListView.builder(
+                  itemCount: posts.length,
+                  itemBuilder: (context, index) {
+                    final post = posts[index];
+                    final data = post.data() as Map<String, dynamic>;
+
+                    return Card(
+                      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                      child: Padding(
+                        padding: const EdgeInsets.all(12),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                CircleAvatar(
+                                  backgroundImage: data['profilePicture'] != ''
+                                      ? NetworkImage(data['profilePicture'])
+                                      : null,
+                                  child: data['profilePicture'] == '' ? const Icon(Icons.person) : null,
+                                ),
+                                const SizedBox(width: 8),
+                                Text(data['username'] ?? 'Kullanıcı', style: const TextStyle(fontWeight: FontWeight.bold)),
+                                const Spacer(),
+                                Text(
+                                  (data['timestamp'] as Timestamp?)?.toDate().toLocal().toString().substring(0, 16) ?? '',
+                                  style: const TextStyle(fontSize: 12, color: Colors.grey),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+                            Text(data['question'] ?? ''),
+                            if (data['imageUrl'] != null && data['imageUrl'] != '')
+                              Padding(
+                                padding: const EdgeInsets.only(top: 8.0),
+                                child: Image.network(data['imageUrl']),
+                              ),
+                            const SizedBox(height: 8),
+                            _buildCommentSection(post.id, data['userId']),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                );
+              },
+            ),
           ),
         ],
       ),
-    ),
-    Expanded(
-    child: StreamBuilder<QuerySnapshot>(
-    stream: _firestore.collection('forumPosts').orderBy('timestamp', descending: true).snapshots(),
-    builder: (context, snapshot) {
-    if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
-    final posts = snapshot.data!.docs;
-
-    return ListView.builder(
-    itemCount: posts.length,
-    itemBuilder: (context, index) {
-    final post = posts[index];
-    final data = post.data() as Map<String, dynamic>;
-
-    return Card(
-    margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-    child: Padding(
-    padding: const EdgeInsets.all(12),
-    child: Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-    Row(
-    children: [
-    CircleAvatar(
-    backgroundImage: data['profilePicture'] != ''
-    ? NetworkImage(data['profilePicture'])
-        : null,
-    child: data['profilePicture'] == '' ? const Icon(Icons.person) : null,
-    ),
-    const SizedBox(width: 8),
-    Text(data['username'] ?? 'Kullanıcı', style: const TextStyle(fontWeight: FontWeight.bold)),
-    const Spacer(),
-    Text(
-    (data['timestamp'] as Timestamp?)?.toDate().toLocal().toString().substring(0, 16) ?? '',
-    style: const TextStyle(fontSize: 12, color: Colors.grey),
-    ),
-    ],
-    ),
-    const SizedBox(height: 8),
-    Text(data['question'] ?? ''),
-    if (data['imageUrl'] != null && data['imageUrl'] != '')
-    Padding(
-    padding: const EdgeInsets.only(top: 8.0),
-    child: Image.network(data['imageUrl']),
-    ),
-    const SizedBox(height: 8),
-    _buildCommentSection(post.id, data['userId']),
-    ],
-    ),
-    ),
-    );
-    },
-    );
-    },
-    ),
-    ),
-    ],
-    ),
     );
   }
 

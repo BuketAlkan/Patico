@@ -58,7 +58,8 @@ class _CreateAdPageState extends ConsumerState<CreateAdPage> {
     await FirebaseFirestore.instance.collection('users').doc(userId).get();
     String userName = userDoc.exists ? userDoc['name'] : 'Anonim';
 
-    await FirebaseFirestore.instance.collection(adType).add({
+// Firestore'da yeni ilan eklerken, otomatik ID'yi alıp 'adId' olarak kaydediyoruz
+    DocumentReference adRef = await FirebaseFirestore.instance.collection(adType).add({
       'title': _titleController.text,
       'description': _descriptionController.text,
       'price': adType == 'Bakım' ? _priceController.text : null,
@@ -66,6 +67,14 @@ class _CreateAdPageState extends ConsumerState<CreateAdPage> {
       'userName': userName,
       'imageUrl': imageUrl,
       'createdAt': Timestamp.now(),
+    });
+
+// Burada yeni eklenen ilan için Firestore tarafından otomatik oluşturulan ID'yi 'adId' olarak kullanıyoruz
+    String adId = adRef.id;
+
+// Şimdi bu 'adId'yi, favorilere ve diğer işlemlerde kullanabilirsin
+    await adRef.update({
+      'adId': adId, // ID'yi veriye ekliyoruz
     });
     print("✅ Firestore'a ilan başarıyla eklendi!");
 

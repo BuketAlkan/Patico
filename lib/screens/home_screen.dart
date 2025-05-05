@@ -6,6 +6,7 @@ import 'package:geocoding/geocoding.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:patico/screens/forum_page.dart';
 import 'package:patico/screens/login.dart';
+import 'package:patico/screens/pet_detailpage.dart';
 import 'package:patico/screens/profile_page.dart';
 import 'package:patico/screens/settings_page.dart';
 import 'package:patico/theme/colors.dart';
@@ -164,38 +165,49 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _buildDrawer() {
+    final currentUser = FirebaseAuth.instance.currentUser;
+
     return Drawer(
-      child: Column(
-        children: [
-          UserAccountsDrawerHeader(
-            currentAccountPicture: CircleAvatar(
-              backgroundImage: NetworkImage(
-                FirebaseAuth.instance.currentUser?.photoURL ??
-                    'https://example.com/default-avatar.png',
+      child: StreamBuilder<DocumentSnapshot>(
+        stream: FirebaseFirestore.instance.collection('users').doc(currentUser!.uid).snapshots(),
+        builder: (context, snapshot) {
+          final userData = snapshot.data?.data() as Map<String, dynamic>?;
+
+          final userName = userData?['name'] ?? 'Kullanıcı';
+          final userEmail = currentUser.email ?? 'E-posta yok';
+          final profileUrl = userData?['profilePicture'] ?? 'https://example.com/default-avatar.png';
+
+          return Column(
+            children: [
+              UserAccountsDrawerHeader(
+                currentAccountPicture: CircleAvatar(
+                  backgroundImage: NetworkImage(profileUrl),
+                ),
+                accountName: Text(userName),
+                accountEmail: Text(userEmail),
               ),
-            ),
-            accountName: Text(userName),
-            accountEmail: Text(userEmail),
-          ),
-          _buildDrawerItem(Icons.person, "Profilim", () {
-            Navigator.push(context, MaterialPageRoute(builder: (context) => const ProfilePage()));
-          }),
-          _buildDrawerItem(Icons.favorite, "Favorilerim", () {
-            Navigator.push(context, MaterialPageRoute(builder: (context) =>  FavoritesPage()));
-          }),
-          _buildDrawerItem(Icons.mode_comment_rounded, "Forum", () {
-            Navigator.push(context, MaterialPageRoute(builder: (context) => const ForumPage()));
-          }),
-          const Spacer(),
-          const Divider(),
-          _buildDrawerItem(Icons.logout, "Çıkış Yap", () async {
-            await FirebaseAuth.instance.signOut();
-            Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(builder: (context) => const LoginScreen()),
-            );
-          }),
-        ],
+              _buildDrawerItem(Icons.person, "Profilim", () {
+                Navigator.push(context, MaterialPageRoute(builder: (context) => const ProfilePage()));
+              }),
+              _buildDrawerItem(Icons.favorite, "Favorilerim", () {
+                Navigator.push(context, MaterialPageRoute(builder: (context) => FavoritesPage()));
+              }),
+              _buildDrawerItem(Icons.mode_comment_rounded, "Forum", () {
+                Navigator.push(context, MaterialPageRoute(builder: (context) => ForumPage()));
+
+              }),
+              const Spacer(),
+              const Divider(),
+              _buildDrawerItem(Icons.logout, "Çıkış Yap", () async {
+                await FirebaseAuth.instance.signOut();
+                Navigator.pushReplacement(
+                  context,
+                  MaterialPageRoute(builder: (context) => const LoginScreen()),
+                );
+              }),
+            ],
+          );
+        },
       ),
     );
   }
@@ -252,7 +264,8 @@ class _HomeContent extends StatelessWidget {
             children: [
               Row(
                 children: [
-                  const Icon(Icons.place_outlined, color: AppColor.labelColor, size: 20),
+                  const Icon(Icons.place_outlined, color: AppColor.labelColor,
+                      size: 20),
                   const SizedBox(width: 5),
                   Text(
                     "Konum",
@@ -277,7 +290,8 @@ class _HomeContent extends StatelessWidget {
           StreamBuilder<QuerySnapshot>(
             stream: FirebaseFirestore.instance
                 .collection('notifications')
-                .where('toUserId', isEqualTo: FirebaseAuth.instance.currentUser?.uid)
+                .where(
+                'toUserId', isEqualTo: FirebaseAuth.instance.currentUser?.uid)
                 .where('isRead', isEqualTo: false)
                 .snapshots(),
             builder: (context, snapshot) {
@@ -287,13 +301,15 @@ class _HomeContent extends StatelessWidget {
                 onTap: () {
                   Navigator.push(
                     context,
-                    MaterialPageRoute(builder: (context) => const NotificationBox()),
+                    MaterialPageRoute(
+                        builder: (context) => const NotificationBox()),
                   );
                 },
                 child: Stack(
                   alignment: Alignment.center,
                   children: [
-                    const Icon(Icons.notifications_none, size: 28, color: Colors.black),
+                    const Icon(Icons.notifications_none, size: 28,
+                        color: Colors.black),
                     if (unreadCount > 0)
                       Positioned(
                         right: 0,
@@ -333,17 +349,57 @@ class _HomeContent extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const SizedBox(height: 25),
-            _buildSectionWithPets("Sahiplendirme İlanları", context),
+            _buildSectionWithPets(
+                "Sahiplendirme İlanları", "Sahiplenme", context),
             const SizedBox(height: 20),
-            _buildSectionWithPets("Bakım İlanları", context),
+            _buildSectionWithPets("Bakım İlanları", "Bakım", context),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildSectionWithPets(String title, BuildContext context) {
-    String collectionName = title.contains("Bakım") ? "Bakım" : "Sahiplenme";
+  Future<List<Map<String, dynamic>>> fetchLatestPets(String type) async {
+    final snapshot = await FirebaseFirestore.instance
+        .collection(type)
+        .orderBy('createdAt', descending: true)
+        .limit(5)
+        .get();
+
+    if (snapshot.docs.isEmpty) {
+      print("No pets found in $type"); // Debug için
+    }
+
+    return snapshot.docs.map((doc) => doc.data()).toList();
+  }
+
+  void _toggleFavorite(Map<String, dynamic> petData) async {
+    final userId = FirebaseAuth.instance.currentUser?.uid;
+    if (userId == null) return;
+
+    final petId = petData['adId']; // DÜZELTİLDİ
+
+    final favoritesRef = FirebaseFirestore.instance.collection('Favorites').doc(
+        userId);
+    final favoriteDoc = await favoritesRef.get();
+
+    if (favoriteDoc.exists) {
+      final favoriteList = List.from(favoriteDoc['petIds'] ?? []);
+      if (favoriteList.contains(petId)) {
+        favoriteList.remove(petId);
+      } else {
+        favoriteList.add(petId);
+      }
+
+      await favoritesRef.update({'petIds': favoriteList});
+    } else {
+      await favoritesRef.set({'petIds': [petId]});
+    }
+  }
+
+
+  Widget _buildSectionWithPets(String title, String type,
+      BuildContext context) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -361,15 +417,18 @@ class _HomeContent extends StatelessWidget {
                 ),
               ),
               ElevatedButton(
-                onPressed: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => MorePetsPage(type: collectionName),
-                  ),
-                ),
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => MorePetsPage(type: type),
+                    ),
+                  );
+                },
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppColor.primary,
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 20, vertical: 10),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(20),
                   ),
@@ -385,22 +444,51 @@ class _HomeContent extends StatelessWidget {
             ],
           ),
         ),
-        CarouselSlider(
-          options: CarouselOptions(
-            height: 400,
-            enlargeCenterPage: true,
-            disableCenter: true,
-            viewportFraction: .8,
-          ),
-          items: List.generate(
-            pets.length,
-                (index) => PetItem(
-              data: pets[index],
-              width: MediaQuery.of(context).size.width * .8,
-              onTap: null,
-              onFavoriteTap: () {},
-            ),
-          ),
+        FutureBuilder<List<Map<String, dynamic>>>(
+          future: fetchLatestPets(type),
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return const Center(child: CircularProgressIndicator());
+            }
+
+            if (!snapshot.hasData || snapshot.data!.isEmpty) {
+              return const Padding(
+                padding: EdgeInsets.all(20.0),
+                child: Center(child: Text('Hiç ilan bulunamadı.')),
+              );
+            }
+
+            final pets = snapshot.data!;
+
+            return CarouselSlider(
+              options: CarouselOptions(
+                height: 400,
+                enlargeCenterPage: true,
+                disableCenter: true,
+                viewportFraction: .8,
+              ),
+              items: pets.map((pet) {
+                return PetItem(
+                  data: pet,
+                  width: MediaQuery
+                      .of(context)
+                      .size
+                      .width * 0.8,
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => PetDetailPage(adData: pet),
+                      ),
+                    );
+                  },
+                  onFavoriteTap: () {
+                    _toggleFavorite(pet);
+                  },
+                );
+              }).toList(),
+            );
+          },
         ),
       ],
     );

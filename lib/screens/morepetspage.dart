@@ -123,24 +123,27 @@ class MorePetsPage extends StatelessWidget {
     );
   }
 
-  void _toggleFavorite(String adId, String userId,
-      Map<String, dynamic> adData) async {
+  void _toggleFavorite(String adId, String userId, Map<String, dynamic> adData) async {
     final favRef = FirebaseFirestore.instance
         .collection("Favorites")
         .doc(userId)
         .collection("UserFavorites")
-        .doc(adId);
+        .doc(adId); // Belge ID olarak adId kullanıyoruz
 
     final docSnapshot = await favRef.get();
 
     if (docSnapshot.exists) {
-      // Eğer zaten favorideyse, sil
+      // Zaten favorideyse: sil
       await favRef.delete();
-      print("Favori ilanı silindi!");
+      print("Favoriden kaldırıldı: $adId");
     } else {
-      // Eğer favoride değilse, ekle
-      await favRef.set(adData);
-      print("Favori ilanı eklendi!");
+      // Favoriye eklerken adData'ya adId bilgisini ekleyerek kaydediyoruz
+      Map<String, dynamic> favoriteData = Map.from(adData);
+      favoriteData["adId"] = adId;
+
+      await favRef.set(favoriteData);
+      print("Favoriye eklendi: $adId");
     }
   }
+
 }

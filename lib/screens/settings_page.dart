@@ -3,6 +3,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:patico/screens/login.dart';
 
+import '../services/forum_service.dart';
+
 class SettingsPage extends StatefulWidget {
   const SettingsPage({Key? key}) : super(key: key);
 
@@ -243,6 +245,20 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
         ],
       ),
+    );
+  }
+  Future<void> _updateUsername(String newUsername) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    final userRef = FirebaseFirestore.instance.collection('users').doc(user.uid);
+    await userRef.update({'name': newUsername});
+
+    // 🔁 Forum ve yorumlarda kullanıcı adını güncelle
+    await ForumService.updateUsernameEverywhere(newUsername);
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text("Kullanıcı adı başarıyla güncellendi.")),
     );
   }
 

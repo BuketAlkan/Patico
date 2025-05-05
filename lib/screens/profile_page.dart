@@ -5,7 +5,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:patico/screens/pet_detailpage.dart';
-import 'dart:io'; // File sınıfını kullanabilmek için gerekli
+import 'dart:io';
 
 import '../services/auth_provider.dart';
 
@@ -22,229 +22,249 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
 
   Future<void> _changeProfilePicture() async {
     final pickedFile = await _picker.pickImage(source: ImageSource.gallery);
-    if (pickedFile == null) {
-      print("Resim seçilmedi");
-      return;
-    }
-
-    File file = File(pickedFile.path);
+    if (pickedFile == null) return;
 
     try {
       final storageRef = FirebaseStorage.instance
           .ref()
-          .child("profile_pictures")
-          .child('${FirebaseAuth.instance.currentUser!.uid}.jpg');
+          .child("profile_pictures/${FirebaseAuth.instance.currentUser!.uid}.jpg");
 
-      await storageRef.putFile(file);
-
+      await storageRef.putFile(File(pickedFile.path));
       String downloadUrl = await storageRef.getDownloadURL();
 
-      await FirebaseFirestore.instance.collection('users').doc(FirebaseAuth.instance.currentUser!.uid).update({
-        'photoURL': downloadUrl,
-      });
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(FirebaseAuth.instance.currentUser!.uid)
+          .update({'photoURL': downloadUrl});
 
-      setState(() {
-        _imageUrl = downloadUrl;
-      });
+      setState(() => _imageUrl = downloadUrl);
     } catch (e) {
-      print("Resim yüklenirken hata oluştu: $e");
+      print("Resim yükleme hatası: $e");
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Profil resmi güncellenirken hata oluştu")),
+      );
     }
+  }
+
+  Future<void> _deleteAdAndRemoveFromFavorites(String collection, String adId) async {
+    try {
+      // 1. İlgili tüm UserFavorites'leri bul
+      final favoritesQuery = await FirebaseFirestore.instance
+          .collectionGroup('UserFavorites')
+          .where('adId', isEqualTo: adId)
+          .get();
+
+      // 2. Batch ile sil
+      final batch = FirebaseFirestore.instance.batch();
+      for (var doc in favoritesQuery.docs) {
+        batch.delete(doc.reference);
+      }
+      await batch.commit();
+
+      // 3. Ana ilanı sil
+      await FirebaseFirestore.instance.collection(collection).doc(adId).delete();
+
+      print("Silme işlemi başarılı!");
+    } catch (e) {
+      print("HATA: ${e.toString()}");
+    }
+  }
+  Widget _buildAdList(String collection) {
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection(collection)
+          .where('userId', isEqualTo: FirebaseAuth.instance.currentUser!.uid)
+          .snapshots(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
+
+        if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+          return Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: Text(
+              "$collection ilanı bulunamadı",
+              style: const TextStyle(color: Colors.grey),
+            ),
+          );
+        }
+
+        return ListView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          itemCount: snapshot.data!.docs.length,
+          itemBuilder: (context, index) {
+            final doc = snapshot.data!.docs[index];
+            final data = doc.data() as Map<String, dynamic>;
+
+            return Card(
+              margin: const EdgeInsets.symmetric(vertical: 8),
+              elevation: 3,
+              child: ListTile(
+                contentPadding: const EdgeInsets.all(12),
+                leading: CircleAvatar(
+                  backgroundColor: Colors.purple[100],
+                  child: const Icon(Icons.pets, color: Colors.purple),
+                ),
+                title: Text(
+                  data['title'] ?? 'Başlıksız',
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+                subtitle: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(data['description'] ?? 'Açıklama yok'),
+                    if (data['petType'] != null)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4.0),
+                        child: Chip(
+                          label: Text(data['petType']),
+                          backgroundColor: Colors.purple[50],
+                        ),
+                      ),
+                  ],
+                ),
+                trailing: IconButton(
+                  icon: const Icon(Icons.delete, color: Colors.red),
+                  onPressed: () => _showDeleteDialog(collection, doc.id),
+                ),
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => PetDetailPage(adData: data),
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Future<void> _showDeleteDialog(String collection, String adId) async {
+    return showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text("İlanı Sil"),
+        content: const Text("Bu ilanı silmek istediğinize emin misiniz? Bu işlem geri alınamaz."),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text("İptal"),
+          ),
+          TextButton(
+            onPressed: () async {
+              Navigator.pop(context);
+              await _deleteAdAndRemoveFromFavorites(collection, adId);
+            },
+            child: const Text("Sil", style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    final authState = ref.watch(authStateProvider);
-
     return Scaffold(
       appBar: AppBar(
-        title: Text("Profilim"),
+        title: const Text("Profilim"),
         centerTitle: true,
-        backgroundColor: Color(0xFFBB86FC),
+        backgroundColor: const Color(0xFFBB86FC),
       ),
-      body: authState.when(
-        data: (user) {
-          if (user == null) {
-            return Center(child: Text("Giriş yapmamış kullanıcı"));
-          }
-
-          return FutureBuilder<DocumentSnapshot>(
-            future: FirebaseFirestore.instance.collection('users').doc(user.uid).get(),
-            builder: (context, snapshot) {
-              if (snapshot.connectionState == ConnectionState.waiting) {
-                return Center(child: CircularProgressIndicator());
-              }
-
-              if (snapshot.hasError) {
-                return Center(child: Text("Hata: ${snapshot.error}"));
-              }
-
-              if (!snapshot.hasData || !snapshot.data!.exists) {
-                return Center(child: Text("Kullanıcı bilgileri bulunamadı"));
-              }
-
-              var userData = snapshot.data!.data() as Map<String, dynamic>;
-              String name = userData['name'] ?? "Bilinmeyen Kullanıcı";
-              String city = userData['city'] ?? 'Bilinmiyor';
-
-              return SingleChildScrollView(  // Sayfayı kaydırılabilir yapıyoruz
-                child: Padding(
-                  padding: const EdgeInsets.all(16.0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Align(
-                        alignment: Alignment.center,
-                        child: GestureDetector(
-                          onTap: _changeProfilePicture,
-                          child: CircleAvatar(
-                            radius: 70,
-                            backgroundImage: _imageUrl != null
-                                ? NetworkImage(_imageUrl!)
-                                : user.photoURL != null
-                                ? NetworkImage(user.photoURL!)
-                                : AssetImage("assets/default_avatar.png") as ImageProvider,
-                          ),
-                        ),
-                      ),
-                      SizedBox(height: 16),
-                      Text(name, style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.purple)),
-                      SizedBox(height: 8),
-                      Text("Şehir: $city", style: TextStyle(fontSize: 18, color: Colors.grey[700])),
-                      SizedBox(height: 20),
-                      // İlanlarım Card
-                      Card(
-                        color: Color(0xFFF1E6FF),
-                        elevation: 4,
-                        child: Padding(
-                          padding: const EdgeInsets.all(16.0),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                "İlanlarım",
-                                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.purple),
-                              ),
-                              SizedBox(height: 12),
-                              // Bakım ilanlarını listele
-                              StreamBuilder<QuerySnapshot>(
-                                stream: FirebaseFirestore.instance
-                                    .collection('Bakım') // Bakım koleksiyonunu kullan
-                                    .where('userId', isEqualTo: user.uid) // Kullanıcı ID'sine göre filtrele
-                                    .snapshots(),
-                                builder: (context, adSnapshot) {
-                                  if (adSnapshot.connectionState == ConnectionState.waiting) {
-                                    return Center(child: CircularProgressIndicator());
-                                  }
-                                  if (adSnapshot.hasError) {
-                                    return Center(child: Text("Error: ${adSnapshot.error}"));
-                                  }
-
-                                  if (!adSnapshot.hasData || adSnapshot.data!.docs.isEmpty) {
-                                    return Center(child: Text("İlan bulunamadı"));
-                                  }
-
-                                  var ads = adSnapshot.data!.docs;
-
-                                  return ListView.builder(
-                                    shrinkWrap: true,
-                                    physics: NeverScrollableScrollPhysics(), // ListView'un scroll olmasını engelle
-                                    itemCount: ads.length,
-                                    itemBuilder: (context, index) {
-                                      var adData = ads[index].data() as Map<String, dynamic>;
-                                      return Card(
-                                        elevation: 5,
-                                        margin: EdgeInsets.symmetric(vertical: 10),
-                                        shape: RoundedRectangleBorder(
-                                          borderRadius: BorderRadius.circular(15),
-                                        ),
-                                        child: ListTile(
-                                          contentPadding: EdgeInsets.all(16),
-                                          title: Text(adData['title'] ?? 'Başlık yok', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
-                                          subtitle: Text(adData['description'] ?? 'Açıklama yok', style: TextStyle(fontSize: 14)),
-                                          leading: Icon(Icons.pets, size: 40, color: Colors.purple),
-                                          trailing: Icon(Icons.arrow_forward_ios, color: Colors.purple),
-                                          onTap: () {
-                                            Navigator.push(
-                                              context,
-                                              MaterialPageRoute(
-                                                builder: (context) => PetDetailPage(adData: adData),
-                                              ),
-                                            );
-                                          },
-                                        ),
-                                      );
-                                    },
-                                  );
-                                },
-                              ),
-                              SizedBox(height: 12),
-                              // Sahiplenme ilanlarını listele
-                              StreamBuilder<QuerySnapshot>(
-                                stream: FirebaseFirestore.instance
-                                    .collection('Sahiplenme') // Sahiplenme koleksiyonunu kullan
-                                    .where('userId', isEqualTo: user.uid) // Kullanıcı ID'sine göre filtrele
-                                    .snapshots(),
-                                builder: (context, adSnapshot) {
-                                  if (adSnapshot.connectionState == ConnectionState.waiting) {
-                                    return Center(child: CircularProgressIndicator());
-                                  }
-                                  if (adSnapshot.hasError) {
-                                    return Center(child: Text("Error: ${adSnapshot.error}"));
-                                  }
-
-                                  if (!adSnapshot.hasData || adSnapshot.data!.docs.isEmpty) {
-                                    return Center(child: Text("İlan bulunamadı"));
-                                  }
-
-                                  var ads = adSnapshot.data!.docs;
-
-                                  return ListView.builder(
-                                    shrinkWrap: true,
-                                    physics: NeverScrollableScrollPhysics(), // ListView'un scroll olmasını engelle
-                                    itemCount: ads.length,
-                                    itemBuilder: (context, index) {
-                                      var adData = ads[index].data() as Map<String, dynamic>;
-                                      return Card(
-                                        elevation: 5,
-                                        margin: EdgeInsets.symmetric(vertical: 10),
-                                        shape: RoundedRectangleBorder(
-                                          borderRadius: BorderRadius.circular(15),
-                                        ),
-                                        child: ListTile(
-                                          contentPadding: EdgeInsets.all(16),
-                                          title: Text(adData['title'] ?? 'Başlık yok', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
-                                          subtitle: Text(adData['description'] ?? 'Açıklama yok', style: TextStyle(fontSize: 14)),
-                                          leading: Icon(Icons.pets, size: 40, color: Colors.purple),
-                                          trailing: Icon(Icons.arrow_forward_ios, color: Colors.purple),
-                                          onTap: () {
-                                            Navigator.push(
-                                              context,
-                                              MaterialPageRoute(
-                                                builder: (context) => PetDetailPage(adData: adData),
-                                              ),
-                                            );
-                                          },
-                                        ),
-                                      );
-                                    },
-                                  );
-                                },
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                      SizedBox(height: 20),
-                    ],
-                  ),
-                ),
-              );
-            },
-          );
-        },
-        loading: () => Center(child: CircularProgressIndicator()),
-        error: (err, stack) => Center(child: Text("Hata: $err")),
+      body: ref.watch(authStateProvider).when(
+        data: (user) => user == null
+            ? const Center(child: Text("Lütfen giriş yapın"))
+            : _buildProfileContent(user),
+        loading: () => const Center(child: CircularProgressIndicator()),
+        error: (_, __) => const Center(child: Text("Hata oluştu")),
       ),
+    );
+  }
+
+  Widget _buildProfileContent(User user) {
+    return FutureBuilder<DocumentSnapshot>(
+      future: FirebaseFirestore.instance.collection('users').doc(user.uid).get(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
+
+        if (!snapshot.hasData || !snapshot.data!.exists) {
+          return const Center(child: Text("Kullanıcı bilgileri bulunamadı"));
+        }
+
+        final userData = snapshot.data!.data() as Map<String, dynamic>;
+
+        return SingleChildScrollView(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            children: [
+              _buildProfileHeader(user, userData),
+              const SizedBox(height: 24),
+              _buildAdSection(),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildProfileHeader(User user, Map<String, dynamic> userData) {
+    return Column(
+      children: [
+        Stack(
+          alignment: Alignment.bottomRight,
+          children: [
+            CircleAvatar(
+              radius: 60,
+              backgroundImage: NetworkImage(
+                  _imageUrl ?? user.photoURL ?? 'https://via.placeholder.com/150'),
+            ),
+            Container(
+              decoration: BoxDecoration(
+                color: Colors.purple,
+                shape: BoxShape.circle,
+                border: Border.all(color: Colors.white, width: 2),
+              ),
+              child: IconButton(
+                icon: const Icon(Icons.camera_alt, color: Colors.white),
+                onPressed: _changeProfilePicture,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        Text(
+          userData['name'] ?? 'İsimsiz',
+          style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          userData['city'] ?? 'Şehir belirtilmemiş',
+          style: TextStyle(color: Colors.grey[600], fontSize: 16),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildAdSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Padding(
+          padding: EdgeInsets.symmetric(vertical: 8.0),
+          child: Text(
+            "İlanlarım",
+            style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+          ),
+        ),
+        _buildAdList('Bakım'),
+        const SizedBox(height: 16),
+        _buildAdList('Sahiplenme'),
+      ],
     );
   }
 }
