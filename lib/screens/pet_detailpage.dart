@@ -1,6 +1,30 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
+import 'Chat_detail_page.dart';
+
+// ✅ Bu fonksiyonu ekle: Sohbet varsa getirir, yoksa oluşturur
+Future<String> createChatIfNotExists(String user1Id, String user2Id) async {
+  final chats = await FirebaseFirestore.instance
+      .collection('chats')
+      .where('users', arrayContains: user1Id)
+      .get();
+
+  for (var doc in chats.docs) {
+    List users = List<String>.from(doc['users']);
+    if (users.contains(user2Id)) return doc.id;
+  }
+
+  final newChat = await FirebaseFirestore.instance.collection('chats').add({
+    'users': [user1Id, user2Id],
+    'createdAt': Timestamp.now(),
+  });
+
+  return newChat.id;
+}
+
+// ✅ Ana sayfa
 class PetDetailPage extends StatefulWidget {
   final Map<String, dynamic> adData;
 
@@ -11,7 +35,7 @@ class PetDetailPage extends StatefulWidget {
 }
 
 class _PetDetailPageState extends State<PetDetailPage> {
-  Map<String, dynamic>? userData; // Kullanıcı bilgilerini burada saklayacağız.
+  Map<String, dynamic>? userData;
 
   @override
   void initState() {
@@ -19,7 +43,6 @@ class _PetDetailPageState extends State<PetDetailPage> {
     fetchUserData();
   }
 
-  // Kullanıcı bilgilerini Firestore'dan çek
   void fetchUserData() async {
     if (widget.adData["userId"] != null) {
       DocumentSnapshot userDoc = await FirebaseFirestore.instance
@@ -37,6 +60,8 @@ class _PetDetailPageState extends State<PetDetailPage> {
 
   @override
   Widget build(BuildContext context) {
+    final currentUser = FirebaseAuth.instance.currentUser;
+
     return Scaffold(
       appBar: AppBar(
         title: Text(widget.adData["title"] ?? "İlan Detayı"),
@@ -78,7 +103,6 @@ class _PetDetailPageState extends State<PetDetailPage> {
             ),
             SizedBox(height: 10),
 
-            // Eğer bakım ilanıysa fiyatı göster
             if (widget.adData.containsKey("price"))
               Text(
                 "Fiyat: ${widget.adData["price"]} TL",
@@ -87,43 +111,66 @@ class _PetDetailPageState extends State<PetDetailPage> {
 
             SizedBox(height: 20),
 
-            // Kullanıcı bilgileri (Eğer veriler yüklendiyse göster)
             userData != null
                 ? Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                // Profil Resmi
-                CircleAvatar(
-                  radius: 30,
-                  backgroundImage: NetworkImage(
-                    userData!["profileImageUrl"] ??
-                        "https://via.placeholder.com/100", // Varsayılan profil resmi
-                  ),
-                ),
-                SizedBox(width: 10),
-
-                // Kullanıcı Adı
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                Row(
                   children: [
-                    Text(
-                      userData!["name"] ?? "Bilinmeyen Kullanıcı",
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                      ),
+                    CircleAvatar(
+                      radius: 30,
+                      backgroundImage: userData!["profileImageUrl"] != null && userData!["profileImageUrl"].toString().isNotEmpty
+                          ? NetworkImage(userData!["profileImageUrl"])
+                          : const AssetImage('assets/images/default_profile.png') as ImageProvider,
                     ),
-                    Text(
-                      "İlan Sahibi",
-                      style: TextStyle(fontSize: 14, color: Colors.grey),
+                    SizedBox(width: 10),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          userData!["name"] ?? "Bilinmeyen Kullanıcı",
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        Text(
+                          "İlan Sahibi",
+                          style: TextStyle(fontSize: 14, color: Colors.grey),
+                        ),
+                      ],
                     ),
                   ],
                 ),
+
+                // ✅ Mesaj Gönder Butonu (kendi ilanı değilse göster)
+                if (currentUser != null &&
+                    currentUser.uid != widget.adData["userId"])
+                  ElevatedButton(
+                    onPressed: () async {
+                      String chatId = await createChatIfNotExists(
+                          currentUser.uid, widget.adData["userId"]);
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) =>
+                              ChatDetailPage(chatId: chatId), // Bu sayfayı senin oluşturman gerek
+                        ),
+                      );
+                    },
+                    child: Text("Mesaj Gönder"),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.pink[300],
+                    ),
+                  ),
               ],
             )
-                : Center(child: CircularProgressIndicator()), // Kullanıcı bilgileri yüklenene kadar gösterilir
+                : Center(child: CircularProgressIndicator()),
           ],
         ),
       ),
     );
   }
 }
+
+//

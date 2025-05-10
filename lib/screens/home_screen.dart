@@ -1,7 +1,13 @@
-import 'package:carousel_slider/carousel_slider.dart';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/cupertino.dart';
+import 'package:flutter/cupertino.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/widgets.dart';
+import 'package:flutter/widgets.dart';
 import 'package:geocoding/geocoding.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:patico/screens/forum_page.dart';
@@ -18,7 +24,7 @@ import 'package:patico/screens/morepetspage.dart';
 import 'package:patico/screens/favorites_page.dart';
 import 'package:patico/screens/chat.dart';
 import 'package:patico/widget/custom_bottom_navbar.dart';
-
+import 'package:smooth_page_indicator/smooth_page_indicator.dart';
 class HomePage extends StatefulWidget {
   const HomePage({Key? key}) : super(key: key);
 
@@ -35,19 +41,22 @@ class _HomePageState extends State<HomePage> {
   String userCity = '';
 
   late List<Widget> _pages;
+  late Future<List<Map<String, dynamic>>> petsFuture;
 
   @override
   void initState() {
     super.initState();
+
     _pages = [
       _HomeContent(
         userCity: userCity,
         notifications: notifications,
         notifiedCount: notifiedCount,
       ),
-     const ChatPage(), // const kaldırıldı
+      ChatPage(), // const kaldırıldı
       SettingsPage(), // const kaldırıldı
     ];
+
     _initializeServices();
     _setupFirebaseMessaging();
     _fetchUserLocation();
@@ -398,8 +407,11 @@ class _HomeContent extends StatelessWidget {
   }
 
 
-  Widget _buildSectionWithPets(String title, String type,
-      BuildContext context) {
+  Widget _buildSectionWithPets(String title, String type, BuildContext context) {
+    final collectionName = type == 'Sahiplenme' ? 'Sahiplenme' : 'Bakım';
+    final PageController _pageController = PageController(viewportFraction: 0.8);
+    final ValueNotifier<int> _currentPage = ValueNotifier<int>(0);
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -427,8 +439,7 @@ class _HomeContent extends StatelessWidget {
                 },
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppColor.primary,
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 20, vertical: 10),
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(20),
                   ),
@@ -444,53 +455,84 @@ class _HomeContent extends StatelessWidget {
             ],
           ),
         ),
-        FutureBuilder<List<Map<String, dynamic>>>(
-          future: fetchLatestPets(type),
+        StreamBuilder<QuerySnapshot>(
+          stream: FirebaseFirestore.instance
+              .collection(collectionName)
+              .orderBy('createdAt', descending: true)
+              .limit(5)
+              .snapshots(),
           builder: (context, snapshot) {
             if (snapshot.connectionState == ConnectionState.waiting) {
               return const Center(child: CircularProgressIndicator());
             }
 
-            if (!snapshot.hasData || snapshot.data!.isEmpty) {
+            if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
               return const Padding(
                 padding: EdgeInsets.all(20.0),
                 child: Center(child: Text('Hiç ilan bulunamadı.')),
               );
             }
 
-            final pets = snapshot.data!;
+            final pets = snapshot.data!.docs.map((doc) {
+              final data = doc.data() as Map<String, dynamic>;
+              data['id'] = doc.id;
+              return data;
+            }).toList();
 
-            return CarouselSlider(
-              options: CarouselOptions(
-                height: 400,
-                enlargeCenterPage: true,
-                disableCenter: true,
-                viewportFraction: .8,
+            return SizedBox(
+              height: 400,
+              child: Column(
+                children: [
+                  Expanded(
+                    child: PageView.builder(
+                      controller: _pageController,
+                      itemCount: pets.length,
+                      onPageChanged: (index) => _currentPage.value = index,
+                      itemBuilder: (context, index) {
+                        final pet = pets[index];
+                        return Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 8.0),
+                          child: PetItem(
+                            data: pet,
+                            width: MediaQuery.of(context).size.width * 0.8,
+                            onTap: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) => PetDetailPage(adData: pet),
+                                ),
+                              );
+                            },
+                            onFavoriteTap: () {
+                              _toggleFavorite(pet);
+                            },
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  ValueListenableBuilder<int>(
+                    valueListenable: _currentPage,
+                    builder: (context, value, _) {
+                      return AnimatedSmoothIndicator(
+                        activeIndex: value,
+                        count: pets.length,
+                        effect: const WormEffect(
+                          dotHeight: 8,
+                          dotWidth: 8,
+                          activeDotColor: Colors.blue,
+                        ),
+                      );
+                    },
+                  ),
+                ],
               ),
-              items: pets.map((pet) {
-                return PetItem(
-                  data: pet,
-                  width: MediaQuery
-                      .of(context)
-                      .size
-                      .width * 0.8,
-                  onTap: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => PetDetailPage(adData: pet),
-                      ),
-                    );
-                  },
-                  onFavoriteTap: () {
-                    _toggleFavorite(pet);
-                  },
-                );
-              }).toList(),
             );
           },
         ),
       ],
     );
   }
+
 }

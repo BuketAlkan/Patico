@@ -42,11 +42,27 @@ class _CreateAdPageState extends ConsumerState<CreateAdPage> {
 
     String? imageUrl;
     if (_isImagePicked) {
-      final storageRef = FirebaseStorage.instance
-          .ref()
-          .child('ads/${DateTime.now().millisecondsSinceEpoch}.jpg');
-      await storageRef.putFile(File(_image!.path));
-      imageUrl = await storageRef.getDownloadURL();
+      try {
+        final storageRef = FirebaseStorage.instance
+            .ref()
+            .child('ads/${DateTime.now().millisecondsSinceEpoch}.jpg');
+
+        final uploadTask = await storageRef.putFile(File(_image!.path));
+        print("📸 Seçilen dosya yolu: ${_image!.path}");
+        // Hatalıysa burada yakalanacak
+        if (uploadTask.state == TaskState.success) {
+          imageUrl = await storageRef.getDownloadURL();
+        } else {
+          throw Exception('Görsel yüklenemedi.');
+    ;
+        }
+      } catch (e) {
+        print("❌ Fotoğraf yükleme hatası: $e");
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Fotoğraf yüklenirken hata oluştu. Lütfen tekrar deneyin.')),
+        );
+        return; // Hata varsa ilan oluşturmayı iptal et
+      }
     }
 
     final user = FirebaseAuth.instance.currentUser;

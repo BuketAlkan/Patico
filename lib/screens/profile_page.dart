@@ -25,17 +25,17 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
     if (pickedFile == null) return;
 
     try {
+      final uid = FirebaseAuth.instance.currentUser!.uid;
       final storageRef = FirebaseStorage.instance
           .ref()
-          .child("profile_pictures/${FirebaseAuth.instance.currentUser!.uid}.jpg");
+          .child("profile_pictures/$uid.jpg");
 
       await storageRef.putFile(File(pickedFile.path));
       String downloadUrl = await storageRef.getDownloadURL();
 
-      await FirebaseFirestore.instance
-          .collection('users')
-          .doc(FirebaseAuth.instance.currentUser!.uid)
-          .update({'photoURL': downloadUrl});
+      // Firestore ve Auth güncelle
+      await FirebaseFirestore.instance.collection('users').doc(uid).update({'photoURL': downloadUrl});
+      await FirebaseAuth.instance.currentUser!.updatePhotoURL(downloadUrl);
 
       setState(() => _imageUrl = downloadUrl);
     } catch (e) {
@@ -48,27 +48,37 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
 
   Future<void> _deleteAdAndRemoveFromFavorites(String collection, String adId) async {
     try {
-      // 1. İlgili tüm UserFavorites'leri bul
-      final favoritesQuery = await FirebaseFirestore.instance
-          .collectionGroup('UserFavorites')
-          .where('adId', isEqualTo: adId)
-          .get();
-
-      // 2. Batch ile sil
       final batch = FirebaseFirestore.instance.batch();
-      for (var doc in favoritesQuery.docs) {
-        batch.delete(doc.reference);
+
+      // Tüm kullanıcıların favorilerinde ilanı sil
+      final allUsers = await FirebaseFirestore.instance.collection('Favorites').get();
+      for (var userDoc in allUsers.docs) {
+        final userFavorites = await FirebaseFirestore.instance
+            .collection('Favorites')
+            .doc(userDoc.id)
+            .collection('UserFavorites')
+            .where('adId', isEqualTo: adId)
+            .get();
+
+        for (var favDoc in userFavorites.docs) {
+          batch.delete(favDoc.reference);
+        }
       }
+
+      // İlanı sil
+      batch.delete(FirebaseFirestore.instance.collection(collection).doc(adId));
+
       await batch.commit();
 
-      // 3. Ana ilanı sil
-      await FirebaseFirestore.instance.collection(collection).doc(adId).delete();
-
-      print("Silme işlemi başarılı!");
+      print("İlan ve favoriler başarıyla silindi!");
     } catch (e) {
       print("HATA: ${e.toString()}");
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("İlan silinirken bir hata oluştu")),
+      );
     }
   }
+
   Widget _buildAdList(String collection) {
     return StreamBuilder<QuerySnapshot>(
       stream: FirebaseFirestore.instance
@@ -213,6 +223,12 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
   }
 
   Widget _buildProfileHeader(User user, Map<String, dynamic> userData) {
+    final profileImageUrl = _imageUrl?.isNotEmpty == true
+        ? _imageUrl!
+        : (user.photoURL?.isNotEmpty == true
+        ? user.photoURL!
+        : 'https://via.placeholder.com/150');
+
     return Column(
       children: [
         Stack(
@@ -220,8 +236,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
           children: [
             CircleAvatar(
               radius: 60,
-              backgroundImage: NetworkImage(
-                  _imageUrl ?? user.photoURL ?? 'https://via.placeholder.com/150'),
+              backgroundImage: NetworkImage(profileImageUrl),
             ),
             Container(
               decoration: BoxDecoration(
