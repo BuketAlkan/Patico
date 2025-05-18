@@ -6,7 +6,6 @@ import 'package:patico/screens/Chat_detail_page.dart';
 class ChatPage extends StatelessWidget {
   const ChatPage({Key? key}) : super(key: key);
 
-  // Karşı tarafın userId'sini bul
   String getOtherUserId(List users, String currentUserId) {
     return users.firstWhere((id) => id != currentUserId);
   }
@@ -19,11 +18,12 @@ class ChatPage extends StatelessWidget {
   Future<String?> getUserPhotoUrl(String userId) async {
     final doc = await FirebaseFirestore.instance.collection('users').doc(userId).get();
     if (doc.exists && doc.data() != null) {
-      return doc.data()!['photoUrl'];
+      return doc.data()!['photoURL'];  // Burada photoURL olarak değişti
     } else {
       return null;
     }
   }
+
   @override
   Widget build(BuildContext context) {
     final currentUser = FirebaseAuth.instance.currentUser;

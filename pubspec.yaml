@@ -39,7 +39,7 @@ dependencies:
   firebase_storage:
   firebase_auth:
   firebase_messaging: ^14.7.0
-  flutter_local_notifications: ^15.1.1
+  flutter_local_notifications:
   cloud_firestore:
   google_sign_in: ^5.4.0
   cached_network_image: ^3.1.0
@@ -53,7 +53,8 @@ dependencies:
   geolocator:
   flutter_riverpod:
   image_picker:
-
+  http:
+  googleapis_auth:
 dev_dependencies:
   flutter_test:
     sdk: flutter

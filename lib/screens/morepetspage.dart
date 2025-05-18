@@ -1,7 +1,12 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'pet_detailpage.dart';
+import 'package:http/http.dart' as http;
+
+
 
 class MorePetsPage extends StatelessWidget {
   final String type;
@@ -52,7 +57,6 @@ class MorePetsPage extends StatelessWidget {
       String adId, String? userId) {
     bool isFavorited = false;
 
-
     return GestureDetector(
       onTap: () =>
           Navigator.push(
@@ -100,11 +104,11 @@ class MorePetsPage extends StatelessWidget {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 IconButton(
-                  icon: Icon(isFavorited ? Icons.favorite : Icons.favorite_border,
-              color: isFavorited ? Colors.red :Colors.grey,
-            ),
+                  icon: Icon(
+                    isFavorited ? Icons.favorite : Icons.favorite_border,
+                    color: isFavorited ? Colors.red : Colors.grey,
+                  ),
                   onPressed: () {
-                    print("Favori butonuna tıklanıyor!"); // Debugging için
                     if (userId != null) {
                       _toggleFavorite(adId, userId, adData);
                     } else {
@@ -123,12 +127,13 @@ class MorePetsPage extends StatelessWidget {
     );
   }
 
-  void _toggleFavorite(String adId, String userId, Map<String, dynamic> adData) async {
+  void _toggleFavorite(String adId, String userId,
+      Map<String, dynamic> adData) async {
     final favRef = FirebaseFirestore.instance
         .collection("Favorites")
         .doc(userId)
         .collection("UserFavorites")
-        .doc(adId); // Belge ID olarak adId kullanıyoruz
+        .doc(adId);
 
     final docSnapshot = await favRef.get();
 
@@ -143,7 +148,64 @@ class MorePetsPage extends StatelessWidget {
 
       await favRef.set(favoriteData);
       print("Favoriye eklendi: $adId");
+
+      // Favori ekledikten sonra bildirim gönder
+      _sendFavoriteNotification(adData); // Bildirim gönderme fonksiyonu
     }
   }
 
+// Favori ekledikten sonra bildirim gönderme
+  void _sendFavoriteNotification(Map<String, dynamic> adData) async {
+    final userToken = await _getUserToken(
+        adData['userId']); // Kullanıcının FCM token'ını al
+
+    if (userToken != null) {
+      final message = {
+        'to': userToken,
+        'notification': {
+          'title': 'Yeni Favoriniz',
+          'body': 'Favorilerinize yeni bir ilan eklendi: ${adData["title"]}'
+        },
+        'data': {
+          'type': 'favorite',
+          'adId': adData["adId"]
+        }
+      };
+
+      await _sendPushNotification(message);
+    }
+  }
+
+// Kullanıcının FCM token'ını almak
+  Future<String?> _getUserToken(String userId) async {
+    final userDoc = await FirebaseFirestore.instance.collection('users').doc(
+        userId).get();
+    if (userDoc.exists) {
+      return userDoc
+          .data()?['fcmToken']; // FCM token'ı firestore'da saklı olmalı
+    }
+    return null;
+  }
+
+// Bildirim gönderme işlemi
+  Future<void> _sendPushNotification(Map<String, dynamic> message) async {
+    final url = Uri.parse('https://fcm.googleapis.com/fcm/send');
+    final response = await http.post(url,
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'key=YOUR_FCM_SERVER_KEY', // FCM server key
+        },
+        body: json.encode(message));
+
+    if (response.statusCode == 200) {
+      print("Bildirim başarıyla gönderildi.");
+    } else {
+      print("Bildirim gönderme başarısız oldu.");
+    }
+  }
 }
+
+
+
+
+

@@ -46,6 +46,8 @@ class _HomePageState extends State<HomePage> {
   @override
   void initState() {
     super.initState();
+    _setupFCM();
+    saveDeviceToken();
 
     _pages = [
       _HomeContent(
@@ -79,6 +81,34 @@ class _HomePageState extends State<HomePage> {
 
   Future<void> _initializeServices() async {
     // Servis başlatma işlemleri
+  }
+  void _setupFCM() async {
+    await FirebaseMessaging.instance.requestPermission();
+
+    // Bildirim geldiğinde foreground'da gösterilecek
+    FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+      if (message.notification != null) {
+        print("Bildirim Başlığı: ${message.notification!.title}");
+        print("Bildirim İçeriği: ${message.notification!.body}");
+
+        // Uygulama içi bildirim kutusu gösterilebilir (Snackbar, Alert vs.)
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(message.notification!.body ?? "Yeni bildirim")),
+        );
+      }
+    });
+  }
+  void saveDeviceToken() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    final token = await FirebaseMessaging.instance.getToken();
+    if (token != null) {
+      await FirebaseFirestore.instance.collection('users').doc(user.uid).update({
+        'fcmToken': token,
+      });
+      print('📲 Token Firestore\'a kaydedildi: $token');
+    }
   }
 
   void _setupFirebaseMessaging() {
@@ -148,6 +178,14 @@ class _HomePageState extends State<HomePage> {
       }
     }
   }
+  void _saveUserToken(String userId) async {
+    String? token = await FirebaseMessaging.instance.getToken();
+    if (token != null) {
+      await FirebaseFirestore.instance.collection('users').doc(userId).set({
+        'fcmToken': token,
+      }, SetOptions(merge: true)); // merge: true, var olan verileri silmeden günceller
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -180,17 +218,30 @@ class _HomePageState extends State<HomePage> {
       child: StreamBuilder<DocumentSnapshot>(
         stream: FirebaseFirestore.instance.collection('users').doc(currentUser!.uid).snapshots(),
         builder: (context, snapshot) {
-          final userData = snapshot.data?.data() as Map<String, dynamic>?;
+          if (!snapshot.hasData) {
+            return const Center(child: CircularProgressIndicator());
+          }
+
+          final userData = snapshot.data!.data() as Map<String, dynamic>?;
 
           final userName = userData?['name'] ?? 'Kullanıcı';
           final userEmail = currentUser.email ?? 'E-posta yok';
-          final profileUrl = userData?['profilePicture'] ?? 'https://example.com/default-avatar.png';
+
+          // photoURL alanını kullan
+          String? profileUrl = userData?['photoURL'];
+
+          // Eğer yoksa varsayılan avatar URL'si
+          profileUrl ??= 'https://example.com/default-avatar.png';
 
           return Column(
             children: [
               UserAccountsDrawerHeader(
                 currentAccountPicture: CircleAvatar(
                   backgroundImage: NetworkImage(profileUrl),
+                  onBackgroundImageError: (_, __) {},
+                  child: profileUrl.isEmpty
+                      ? const Icon(Icons.person, size: 40)
+                      : null,
                 ),
                 accountName: Text(userName),
                 accountEmail: Text(userEmail),
@@ -203,7 +254,6 @@ class _HomePageState extends State<HomePage> {
               }),
               _buildDrawerItem(Icons.mode_comment_rounded, "Forum", () {
                 Navigator.push(context, MaterialPageRoute(builder: (context) => ForumPage()));
-
               }),
               const Spacer(),
               const Divider(),
@@ -220,6 +270,8 @@ class _HomePageState extends State<HomePage> {
       ),
     );
   }
+
+
 
   ListTile _buildDrawerItem(IconData icon, String title, VoidCallback onTap) {
     return ListTile(
@@ -386,7 +438,7 @@ class _HomeContent extends StatelessWidget {
     final userId = FirebaseAuth.instance.currentUser?.uid;
     if (userId == null) return;
 
-    final petId = petData['adId']; // DÜZELTİLDİ
+    final petId = petData['adId'];
 
     final favoritesRef = FirebaseFirestore.instance.collection('Favorites').doc(
         userId);
@@ -409,34 +461,30 @@ class _HomeContent extends StatelessWidget {
 
   Widget _buildSectionWithPets(String title, String type, BuildContext context) {
     final collectionName = type == 'Sahiplenme' ? 'Sahiplenme' : 'Bakım';
-    final PageController _pageController = PageController(viewportFraction: 0.8);
-    final ValueNotifier<int> _currentPage = ValueNotifier<int>(0);
+    final pageController = PageController(viewportFraction: 0.8);
+    final currentPage = ValueNotifier<int>(0);
+    final userId = FirebaseAuth.instance.currentUser?.uid;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        // Başlık ve "Daha Fazla" butonu aynen kaldı
         Padding(
           padding: const EdgeInsets.fromLTRB(15, 0, 15, 15),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(
-                title,
-                style: TextStyle(
-                  color: AppColor.textColor,
-                  fontWeight: FontWeight.w700,
-                  fontSize: 24,
-                ),
-              ),
+              Text(title,
+                  style: TextStyle(
+                    color: AppColor.textColor,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 24,
+                  )),
               ElevatedButton(
-                onPressed: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => MorePetsPage(type: type),
-                    ),
-                  );
-                },
+                onPressed: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => MorePetsPage(type: type)),
+                ),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppColor.primary,
                   padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
@@ -444,38 +492,36 @@ class _HomeContent extends StatelessWidget {
                     borderRadius: BorderRadius.circular(20),
                   ),
                 ),
-                child: const Text(
-                  "Daha Fazla",
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 16,
-                  ),
-                ),
+                child: const Text("Daha Fazla",
+                    style: TextStyle(color: Colors.white, fontSize: 16)),
               ),
             ],
           ),
         ),
+
+        // İlanları çeken StreamBuilder
         StreamBuilder<QuerySnapshot>(
           stream: FirebaseFirestore.instance
               .collection(collectionName)
               .orderBy('createdAt', descending: true)
               .limit(5)
               .snapshots(),
-          builder: (context, snapshot) {
-            if (snapshot.connectionState == ConnectionState.waiting) {
+          builder: (context, snap) {
+            if (snap.connectionState == ConnectionState.waiting) {
               return const Center(child: CircularProgressIndicator());
             }
-
-            if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+            final docs = snap.data?.docs ?? [];
+            if (docs.isEmpty) {
               return const Padding(
-                padding: EdgeInsets.all(20.0),
+                padding: EdgeInsets.all(20),
                 child: Center(child: Text('Hiç ilan bulunamadı.')),
               );
             }
 
-            final pets = snapshot.data!.docs.map((doc) {
-              final data = doc.data() as Map<String, dynamic>;
-              data['id'] = doc.id;
+            // Her dokümandan bir Map çıkar ve adId olarak ID'yi set et
+            final pets = docs.map((doc) {
+              final data = doc.data()! as Map<String, dynamic>;
+              data['adId'] = doc.id;
               return data;
             }).toList();
 
@@ -485,46 +531,59 @@ class _HomeContent extends StatelessWidget {
                 children: [
                   Expanded(
                     child: PageView.builder(
-                      controller: _pageController,
+                      controller: pageController,
                       itemCount: pets.length,
-                      onPageChanged: (index) => _currentPage.value = index,
+                      onPageChanged: (i) => currentPage.value = i,
                       itemBuilder: (context, index) {
                         final pet = pets[index];
-                        return Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 8.0),
-                          child: PetItem(
-                            data: pet,
-                            width: MediaQuery.of(context).size.width * 0.8,
-                            onTap: () {
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (context) => PetDetailPage(adData: pet),
+                        final adId = pet['adId'];
+
+                        // Favori listesini dinleyen StreamBuilder
+                        return StreamBuilder<DocumentSnapshot>(
+                          stream: FirebaseFirestore.instance
+                              .collection('Favorites')
+                              .doc(userId)
+                              .snapshots(),
+                          builder: (context, favSnap) {
+                            bool isFav = false;
+                            if (favSnap.hasData && favSnap.data!.exists) {
+                              final favList = List<String>.from(
+                                  favSnap.data!['petIds'] ?? []);
+                              isFav = favList.contains(adId);
+                            }
+
+                            return Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 8.0),
+                              child: PetItem(
+                                data: pet,
+                                width: MediaQuery.of(context).size.width * 0.8,
+                                isFavorite: isFav,
+                                onTap: () => Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                      builder: (_) =>
+                                          PetDetailPage(adData: pet)),
                                 ),
-                              );
-                            },
-                            onFavoriteTap: () {
-                              _toggleFavorite(pet);
-                            },
-                          ),
+                                onFavoriteTap: () => _toggleFavorite(pet),
+                              ),
+                            );
+                          },
                         );
                       },
                     ),
                   ),
                   const SizedBox(height: 16),
                   ValueListenableBuilder<int>(
-                    valueListenable: _currentPage,
-                    builder: (context, value, _) {
-                      return AnimatedSmoothIndicator(
-                        activeIndex: value,
-                        count: pets.length,
-                        effect: const WormEffect(
-                          dotHeight: 8,
-                          dotWidth: 8,
-                          activeDotColor: Colors.blue,
-                        ),
-                      );
-                    },
+                    valueListenable: currentPage,
+                    builder: (context, value, _) => AnimatedSmoothIndicator(
+                      activeIndex: value,
+                      count: pets.length,
+                      effect: const WormEffect(
+                        dotHeight: 8,
+                        dotWidth: 8,
+                        activeDotColor: Colors.blue,
+                      ),
+                    ),
                   ),
                 ],
               ),

@@ -1,116 +1,90 @@
+import 'dart:convert';
 import 'dart:io';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:http/http.dart' as http;
 
 class ForumPage extends StatefulWidget {
-  final String? postId;
-  const ForumPage({super.key,this.postId});
+  const ForumPage({Key? key}) : super(key: key);
 
   @override
   State<ForumPage> createState() => _ForumPageState();
 }
 
 class _ForumPageState extends State<ForumPage> {
+  final FirebaseAuth _auth = FirebaseAuth.instance;
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final TextEditingController _questionController = TextEditingController();
   File? _selectedImage;
+  final ImagePicker _picker = ImagePicker();
 
-  final _auth = FirebaseAuth.instance;
-  final _firestore = FirebaseFirestore.instance;
-  final picker = ImagePicker();
+  final String _imgbbApiKey = '984d720ca4875a9e9aede1fbb12b0ccb'; // kendi imgbb api anahtarın
 
   Future<void> _pickImage() async {
-    final picked = await picker.pickImage(source: ImageSource.gallery);
-    if (picked != null) {
-      setState(() => _selectedImage = File(picked.path));
+    final XFile? pickedFile = await _picker.pickImage(
+      source: ImageSource.gallery,
+      imageQuality: 75,
+    );
+    if (pickedFile != null) {
+      setState(() {
+        _selectedImage = File(pickedFile.path);
+      });
     }
   }
 
-  Future<String?> _uploadImage(File file) async {
-    final fileName = '${DateTime.now().millisecondsSinceEpoch}.jpg';
-    final ref = FirebaseStorage.instance.ref().child('forumImages').child(fileName);
-    await ref.putFile(file);
-    return await ref.getDownloadURL();
+  Future<String?> _uploadImageToImgbb(File imageFile) async {
+    try {
+      final bytes = await imageFile.readAsBytes();
+      final base64Image = base64Encode(bytes);
+
+      final response = await http.post(
+        Uri.parse('https://api.imgbb.com/1/upload?key=$_imgbbApiKey'),
+        body: {'image': base64Image},
+      );
+
+      final data = jsonDecode(response.body);
+      if (data['success'] == true) {
+        return data['data']['url'] as String?;
+      }
+    } catch (e) {
+      debugPrint('Fotoğraf yükleme hatası: $e');
+    }
+    return null;
   }
 
-  Future<void> _postQuestion() async {
+  Future<void> _sendQuestion() async {
     final user = _auth.currentUser;
-    if (user == null || _questionController.text.trim().isEmpty) return;
+    if (user == null) return;
 
-    final userDoc = await _firestore.collection('users').doc(user.uid).get();
-    final userData = userDoc.data();
-    String? imageUrl;
+    final questionText = _questionController.text.trim();
+    if (questionText.isEmpty) return;
 
+    String? uploadedImageUrl;
     if (_selectedImage != null) {
-      imageUrl = await _uploadImage(_selectedImage!);
+      uploadedImageUrl = await _uploadImageToImgbb(_selectedImage!);
     }
 
     await _firestore.collection('forumPosts').add({
-      'question': _questionController.text.trim(),
+      'question': questionText,
       'userId': user.uid,
-      'username': userData?['name'] ?? 'Bilinmeyen',
-      'profilePicture': userData?['profilePicture'] ?? '',
-      'imageUrl': imageUrl ?? '',
+      'imageUrl': uploadedImageUrl ?? '',
       'timestamp': FieldValue.serverTimestamp(),
     });
 
     _questionController.clear();
-    setState(() => _selectedImage = null);
-  }
-
-  Future<void> _addComment(String postId, String postOwnerId, String commentText) async {
-    try {
-      final user = FirebaseAuth.instance.currentUser;
-      if (user == null || commentText
-          .trim()
-          .isEmpty) return;
-
-      final userDoc = await FirebaseFirestore.instance.collection('users').doc(
-          user.uid).get();
-      final username = userDoc.data()?['name'] ?? 'Kullanıcı';
-      final profilePicture = userDoc.data()?['profilePicture'] ?? '';
-
-      await FirebaseFirestore.instance
-          .collection('forumPosts')
-          .doc(postId)
-          .collection('comments')
-          .add({
-        'userId': user.uid,
-        'username': username,
-        'profilePicture': profilePicture,
-        'comment': commentText,
-        'timestamp': Timestamp.now(),
-      });
-
-      if (postOwnerId != user.uid) {
-        await _sendNotification(postOwnerId, user.uid, commentText,postId);
-      }
-
-    } catch (e) {
-      print("Yorum eklenirken hata oluştu: $e");
-    }
-  }
-
-  Future<void> _sendNotification(String postOwnerId, String senderId, String commentText, String postId) async {
-    if (postOwnerId == senderId) return;
-
-    final senderDoc = await FirebaseFirestore.instance.collection('users').doc(senderId).get();
-    final senderName = senderDoc.data()?['name'] ?? 'Bilinmeyen';
-
-    await FirebaseFirestore.instance.collection('notifications').add({
-      'toUserId': postOwnerId,
-      'senderId': senderId,
-      'senderName': senderName,
-      'type': 'comment',
-      'content': commentText,
-      'relatedId': postId,
-      'timestamp': Timestamp.now(),
-      'isRead': false,
+    setState(() {
+      _selectedImage = null;
     });
   }
 
+  String _formatTimestamp(Timestamp? timestamp) {
+    if (timestamp == null) return '';
+    final dt = timestamp.toDate();
+    return '${dt.day.toString().padLeft(2, '0')}.${dt.month.toString().padLeft(2, '0')}.${dt.year} ${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -118,7 +92,7 @@ class _ForumPageState extends State<ForumPage> {
       backgroundColor: const Color(0xFFFFF0F5),
       appBar: AppBar(
         backgroundColor: const Color(0xFFFFC0CB),
-        title: const Text('🐾  Patili Forum', style: TextStyle(fontWeight: FontWeight.bold)),
+        title: const Text('🐾 Patili Forum', style: TextStyle(fontWeight: FontWeight.bold)),
       ),
       body: Column(
         children: [
@@ -139,84 +113,122 @@ class _ForumPageState extends State<ForumPage> {
                             borderRadius: BorderRadius.all(Radius.circular(20)),
                           ),
                         ),
-                      ), // TextField'ın kapanışı
+                      ),
                     ),
                     IconButton(
                       icon: const Icon(Icons.photo),
                       onPressed: _pickImage,
                     ),
                     ElevatedButton.icon(
-                      onPressed: _postQuestion,
+                      onPressed: _sendQuestion,
                       icon: const Icon(Icons.pets),
                       label: const Text('Paylaş'),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: const Color(0xFFFFB6C1),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(20),
-                        ),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
                       ),
-                    ), // ElevatedButton.icon kapanışı
+                    ),
                   ],
                 ),
-
                 if (_selectedImage != null)
                   Padding(
-                    padding: const EdgeInsets.all(8.0),
+                    padding: const EdgeInsets.only(top: 8.0),
                     child: Image.file(_selectedImage!, height: 100),
                   ),
               ],
             ),
           ),
+          const Divider(),
           Expanded(
             child: StreamBuilder<QuerySnapshot>(
-              stream: _firestore.collection('forumPosts').orderBy('timestamp', descending: true).snapshots(),
+              stream: _firestore
+                  .collection('forumPosts')
+                  .orderBy('timestamp', descending: true)
+                  .snapshots(),
               builder: (context, snapshot) {
-                if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+                if (!snapshot.hasData) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+
                 final posts = snapshot.data!.docs;
+
+                if (posts.isEmpty) {
+                  return const Center(child: Text('Henüz soru yok.'));
+                }
 
                 return ListView.builder(
                   itemCount: posts.length,
                   itemBuilder: (context, index) {
-                    final post = posts[index];
-                    final data = post.data() as Map<String, dynamic>;
+                    final postDoc = posts[index];
+                    final postData = postDoc.data() as Map<String, dynamic>;
+                    final String userId = postData['userId'] ?? '';
+                    final String question = postData['question'] ?? '';
+                    final String imageUrl = postData['imageUrl'] ?? '';
+                    final Timestamp? timestamp = postData['timestamp'];
 
-                    return Card(
-                      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                      child: Padding(
-                        padding: const EdgeInsets.all(12),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
+                    return FutureBuilder<DocumentSnapshot>(
+                      future: _firestore.collection('users').doc(userId).get(),
+                      builder: (context, userSnapshot) {
+                        if (userSnapshot.connectionState == ConnectionState.waiting) {
+                          return const ListTile(
+                            leading: CircleAvatar(child: CircularProgressIndicator()),
+                            title: Text('Yükleniyor...'),
+                          );
+                        }
+
+                        if (!userSnapshot.hasData || !userSnapshot.data!.exists) {
+                          return ListTile(
+                            leading: const CircleAvatar(child: Icon(Icons.person)),
+                            title: Text('Kullanıcı bilgisi bulunamadı'),
+                            subtitle: Text(question),
+                          );
+                        }
+
+                        final userData = userSnapshot.data!.data() as Map<String, dynamic>;
+                        final String username = userData['name'] ?? 'Kullanıcı';
+                        final String photoUrl = userData['photoUrl'] ?? '';
+
+                        return Card(
+                          margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                          child: Padding(
+                            padding: const EdgeInsets.all(12),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                CircleAvatar(
-                                  backgroundImage: data['profilePicture'] != ''
-                                      ? NetworkImage(data['profilePicture'])
-                                      : null,
-                                  child: data['profilePicture'] == '' ? const Icon(Icons.person) : null,
+                                Row(
+                                  children: [
+                                    CircleAvatar(
+                                      backgroundImage: photoUrl.isNotEmpty
+                                          ? NetworkImage(photoUrl)
+                                          : null,
+                                      child: photoUrl.isEmpty
+                                          ? const Icon(Icons.person)
+                                          : null,
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Text(username, style: const TextStyle(fontWeight: FontWeight.bold)),
+                                    const Spacer(),
+                                    Text(
+                                      _formatTimestamp(timestamp),
+                                      style: const TextStyle(fontSize: 12, color: Colors.grey),
+                                    ),
+                                  ],
                                 ),
-                                const SizedBox(width: 8),
-                                Text(data['username'] ?? 'Kullanıcı', style: const TextStyle(fontWeight: FontWeight.bold)),
-                                const Spacer(),
-                                Text(
-                                  (data['timestamp'] as Timestamp?)?.toDate().toLocal().toString().substring(0, 16) ?? '',
-                                  style: const TextStyle(fontSize: 12, color: Colors.grey),
-                                ),
+                                const SizedBox(height: 8),
+                                Text(question),
+                                if (imageUrl.isNotEmpty)
+                                  Padding(
+                                    padding: const EdgeInsets.only(top: 8.0),
+                                    child: Image.network(imageUrl),
+                                  ),
+                                const SizedBox(height: 8),
+                                _CommentSection(postId: postDoc.id),
                               ],
                             ),
-                            const SizedBox(height: 8),
-                            Text(data['question'] ?? ''),
-                            if (data['imageUrl'] != null && data['imageUrl'] != '')
-                              Padding(
-                                padding: const EdgeInsets.only(top: 8.0),
-                                child: Image.network(data['imageUrl']),
-                              ),
-                            const SizedBox(height: 8),
-                            _buildCommentSection(post.id, data['userId']),
-                          ],
-                        ),
-                      ),
+                          ),
+                        );
+                      },
                     );
                   },
                 );
@@ -227,75 +239,141 @@ class _ForumPageState extends State<ForumPage> {
       ),
     );
   }
+}
 
-  Widget _buildCommentSection(String postId, String postOwnerId) {
-    final commentController = TextEditingController();
+class _CommentSection extends StatefulWidget {
+  final String postId;
+  const _CommentSection({required this.postId, Key? key}) : super(key: key);
 
+  @override
+  State<_CommentSection> createState() => _CommentSectionState();
+}
+
+class _CommentSectionState extends State<_CommentSection> {
+  final TextEditingController _commentController = TextEditingController();
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+
+  Future<void> _sendComment() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    final commentText = _commentController.text.trim();
+    if (commentText.isEmpty) return;
+
+    await _firestore
+        .collection('forumPosts')
+        .doc(widget.postId)
+        .collection('comments')
+        .add({
+      'userId': user.uid,
+      'comment': commentText,
+      'timestamp': Timestamp.now(),
+    });
+
+    _commentController.clear();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         StreamBuilder<QuerySnapshot>(
-          stream: FirebaseFirestore.instance
+          stream: _firestore
               .collection('forumPosts')
-              .doc(postId)
+              .doc(widget.postId)
               .collection('comments')
               .orderBy('timestamp', descending: true)
               .snapshots(),
           builder: (context, snapshot) {
-            if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+            if (!snapshot.hasData) {
+              return const Center(child: CircularProgressIndicator());
+            }
+
             final comments = snapshot.data!.docs;
 
             return Column(
-              children: comments.map((commentDoc) {
-                final commentData = commentDoc.data() as Map<String, dynamic>;
-                return ListTile(
-                  leading: CircleAvatar(
-                    backgroundImage: commentData['profilePicture'] != ''
-                        ? NetworkImage(commentData['profilePicture'])
-                        : null,
-                    child: commentData['profilePicture'] == '' ? const Icon(Icons.person) : null,
-                  ),
-                  title: Text(commentData['username'] ?? 'Kullanıcı'),
-                  subtitle: Text(commentData['comment'] ?? ''),
-                  trailing: Text(
-                    (commentData['timestamp'] as Timestamp?)?.toDate().toLocal().toString().substring(0, 16) ?? '',
-                    style: const TextStyle(fontSize: 10, color: Colors.grey),
-                  ),
+              children: comments.map((doc) {
+                final data = doc.data() as Map<String, dynamic>;
+                final userId = data['userId'] ?? '';
+                final comment = data['comment'] ?? '';
+                final Timestamp? timestamp = data['timestamp'];
+
+                return FutureBuilder<DocumentSnapshot>(
+                  future: _firestore.collection('users').doc(userId).get(),
+                  builder: (context, userSnapshot) {
+                    if (userSnapshot.connectionState == ConnectionState.waiting) {
+                      return const ListTile(
+                        leading: CircleAvatar(child: CircularProgressIndicator()),
+                        title: Text('Yükleniyor...'),
+                      );
+                    }
+
+                    if (!userSnapshot.hasData || !userSnapshot.data!.exists) {
+                      return ListTile(
+                        leading: const CircleAvatar(child: Icon(Icons.person)),
+                        title: Text(comment),
+                        subtitle: timestamp != null
+                            ? Text(_formatTimestamp(timestamp))
+                            : null,
+                      );
+                    }
+
+                    final userData = userSnapshot.data!.data() as Map<String, dynamic>;
+                    final String username = userData['name'] ?? 'Kullanıcı';
+                    final String photoUrl = userData['photoUrl'] ?? '';
+
+                    return ListTile(
+                      leading: CircleAvatar(
+                        backgroundImage:
+                        photoUrl.isNotEmpty ? NetworkImage(photoUrl) : null,
+                        child: photoUrl.isEmpty ? const Icon(Icons.person) : null,
+                      ),
+                      title: Text(username),
+                      subtitle: Text(comment),
+                      trailing: timestamp != null
+                          ? Text(
+                        _formatTimestamp(timestamp),
+                        style: const TextStyle(fontSize: 10, color: Colors.grey),
+                      )
+                          : null,
+                    );
+                  },
                 );
               }).toList(),
             );
           },
         ),
-        const SizedBox(height: 6),
-        Row(
-          children: [
-            Expanded(
-              child: TextField(
-                controller: commentController,
-                decoration: const InputDecoration(
-                  hintText: 'Yorum yap...',
-                  filled: true,
-                  fillColor: Color(0xFFFFF5F5),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(20))),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8.0),
+          child: Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _commentController,
+                  decoration: const InputDecoration(
+                    hintText: 'Yorum yaz...',
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.all(Radius.circular(20)),
+                    ),
+                    filled: true,
+                    fillColor: Colors.white,
+                  ),
                 ),
               ),
-            ),
-            IconButton(
-              icon: const Icon(Icons.send, color: Color(0xFFFF69B4)),
-              onPressed: () async {
-                if (commentController.text.trim().isNotEmpty) {
-                  await _addComment(
-                    postId,
-                    postOwnerId,
-                    commentController.text.trim(),
-                  );
-                  commentController.clear();
-                }
-              },
-            ),
-          ],
+              IconButton(
+                icon: const Icon(Icons.send),
+                onPressed: _sendComment,
+              ),
+            ],
+          ),
         ),
       ],
     );
+  }
+
+  String _formatTimestamp(Timestamp? timestamp) {
+    if (timestamp == null) return '';
+    final dt = timestamp.toDate();
+    return '${dt.day.toString().padLeft(2, '0')}.${dt.month.toString().padLeft(2, '0')}.${dt.year} ${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
   }
 }

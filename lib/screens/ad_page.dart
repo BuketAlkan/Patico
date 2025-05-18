@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
-import 'package:firebase_storage/firebase_storage.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
 import 'dart:io';
+
 import '../theme/colors.dart'; // Tema renkleri
 
 final adTypeProvider = StateProvider<String>((ref) => 'Bakım');
@@ -32,6 +34,22 @@ class _CreateAdPageState extends ConsumerState<CreateAdPage> {
     });
   }
 
+  Future<String?> _uploadToImgbb(File imageFile) async {
+    const String imgbbApiKey = '984d720ca4875a9e9aede1fbb12b0ccb'; // 🔑 imgbb API anahtarını buraya ekle
+    final url = Uri.parse("https://api.imgbb.com/1/upload?key=$imgbbApiKey");
+
+    final base64Image = base64Encode(await imageFile.readAsBytes());
+    final response = await http.post(url, body: {'image': base64Image});
+
+    if (response.statusCode == 200) {
+      final data = jsonDecode(response.body);
+      return data['data']['url'];
+    } else {
+      print("❌ imgbb yükleme hatası: ${response.body}");
+      return null;
+    }
+  }
+
   Future<void> _createAd() async {
     if (_titleController.text.isEmpty || _descriptionController.text.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -41,27 +59,14 @@ class _CreateAdPageState extends ConsumerState<CreateAdPage> {
     }
 
     String? imageUrl;
-    if (_isImagePicked) {
-      try {
-        final storageRef = FirebaseStorage.instance
-            .ref()
-            .child('ads/${DateTime.now().millisecondsSinceEpoch}.jpg');
 
-        final uploadTask = await storageRef.putFile(File(_image!.path));
-        print("📸 Seçilen dosya yolu: ${_image!.path}");
-        // Hatalıysa burada yakalanacak
-        if (uploadTask.state == TaskState.success) {
-          imageUrl = await storageRef.getDownloadURL();
-        } else {
-          throw Exception('Görsel yüklenemedi.');
-    ;
-        }
-      } catch (e) {
-        print("❌ Fotoğraf yükleme hatası: $e");
+    if (_isImagePicked && _image != null) {
+      imageUrl = await _uploadToImgbb(File(_image!.path));
+      if (imageUrl == null) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Fotoğraf yüklenirken hata oluştu. Lütfen tekrar deneyin.')),
+          SnackBar(content: Text('Fotoğraf yüklenemedi.')),
         );
-        return; // Hata varsa ilan oluşturmayı iptal et
+        return;
       }
     }
 
@@ -74,8 +79,8 @@ class _CreateAdPageState extends ConsumerState<CreateAdPage> {
     await FirebaseFirestore.instance.collection('users').doc(userId).get();
     String userName = userDoc.exists ? userDoc['name'] : 'Anonim';
 
-// Firestore'da yeni ilan eklerken, otomatik ID'yi alıp 'adId' olarak kaydediyoruz
-    DocumentReference adRef = await FirebaseFirestore.instance.collection(adType).add({
+    DocumentReference adRef =
+    await FirebaseFirestore.instance.collection(adType).add({
       'title': _titleController.text,
       'description': _descriptionController.text,
       'price': adType == 'Bakım' ? _priceController.text : null,
@@ -85,25 +90,18 @@ class _CreateAdPageState extends ConsumerState<CreateAdPage> {
       'createdAt': Timestamp.now(),
     });
 
-// Burada yeni eklenen ilan için Firestore tarafından otomatik oluşturulan ID'yi 'adId' olarak kullanıyoruz
-    String adId = adRef.id;
+    await adRef.update({'adId': adRef.id});
 
-// Şimdi bu 'adId'yi, favorilere ve diğer işlemlerde kullanabilirsin
-    await adRef.update({
-      'adId': adId, // ID'yi veriye ekliyoruz
-    });
-    print("✅ Firestore'a ilan başarıyla eklendi!");
-
-setState(() {
-    _titleController.clear();
-    _descriptionController.clear();
-    _priceController.clear();
-
+    setState(() {
+      _titleController.clear();
+      _descriptionController.clear();
+      _priceController.clear();
+      _image = null;
       _isImagePicked = false;
     });
 
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('İlan Başarıyla Oluşturuldu!')),
+      SnackBar(content: Text('İlan başarıyla oluşturuldu!')),
     );
   }
 
@@ -133,7 +131,7 @@ setState(() {
                   color: Colors.white,
                   borderRadius: BorderRadius.circular(15),
                   boxShadow: [
-                    BoxShadow(color: Colors.purple.shade100, blurRadius: 10, spreadRadius: 2)
+                    BoxShadow(color: Colors.purple.shade100, blurRadius: 10, spreadRadius: 2),
                   ],
                 ),
                 child: _isImagePicked
@@ -146,7 +144,7 @@ setState(() {
                   children: [
                     Icon(Icons.add_a_photo, size: 60, color: Colors.purple.shade300),
                     SizedBox(height: 8),
-                    Text('Resim Seç', style: TextStyle(color: Colors.grey.shade600))
+                    Text('Resim Seç', style: TextStyle(color: Colors.grey.shade600)),
                   ],
                 ),
               ),
@@ -155,8 +153,10 @@ setState(() {
             _buildTextField(_titleController, 'İlan Başlığı'),
             SizedBox(height: 12),
             _buildTextField(_descriptionController, 'İlan Açıklaması', maxLines: 3),
-            if (adType == 'Bakım') SizedBox(height: 12),
-            if (adType == 'Bakım') _buildTextField(_priceController, 'Ücret (₺)', isNumber: true),
+            if (adType == 'Bakım') ...[
+              SizedBox(height: 12),
+              _buildTextField(_priceController, 'Ücret (₺)', isNumber: true),
+            ],
             SizedBox(height: 16),
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
@@ -170,8 +170,7 @@ setState(() {
               width: double.infinity,
               height: 50,
               child: ElevatedButton(
-                onPressed:(){ _createAd();
-    print("📌 İlanı Paylaş butonuna basıldı!"); },
+                onPressed: _createAd,
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppColor.primary,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),

@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 
 class PetItem extends StatelessWidget {
   final Map<String, dynamic> data;
   final double width;
   final VoidCallback? onTap;
   final VoidCallback? onFavoriteTap;
+  final bool isFavorite;  // Favori durumu için ekledik
 
   const PetItem({
     super.key,
@@ -13,15 +13,20 @@ class PetItem extends StatelessWidget {
     required this.width,
     this.onTap,
     this.onFavoriteTap,
+    this.isFavorite = false,   // default false
   });
 
   @override
   Widget build(BuildContext context) {
     final imageUrl = data['imageUrl'] ?? '';
     final title = data['title'] ?? 'İsimsiz İlan';
+
+    // Burada kullanıcı adını 'username' veya 'name' alanlarından alıyoruz.
+    // Senin veritabanında username olarak geçiyorsa onu tercih edebilirsin.
+    final username = data['username'] ?? data['name'] ?? 'Kullanıcı';
+
     final description = data['description'] ?? 'Açıklama yok';
-    final username = data['username'] ?? 'Kullanıcı';
-    final petId = data['petId']; // İlanın benzersiz ID'si
+    final petId = data['petId'];
 
     return GestureDetector(
       onTap: onTap,
@@ -32,7 +37,6 @@ class PetItem extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Resim alanı
             ClipRRect(
               borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
               child: imageUrl.isNotEmpty
@@ -44,8 +48,6 @@ class PetItem extends StatelessWidget {
                 child: const Icon(Icons.image_not_supported, size: 60, color: Colors.grey),
               ),
             ),
-
-            // Metin alanları
             Padding(
               padding: const EdgeInsets.all(12),
               child: Column(
@@ -56,18 +58,17 @@ class PetItem extends StatelessWidget {
                   const SizedBox(height: 4),
                   Text(description, maxLines: 2, overflow: TextOverflow.ellipsis),
                   const SizedBox(height: 8),
-                  Text("İlan sahibi: $username",
-                      style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                  //Text("İlan sahibi: $username",
+                    //  style: const TextStyle(fontSize: 12, color: Colors.grey)),
                   Align(
                     alignment: Alignment.bottomRight,
                     child: IconButton(
                       icon: Icon(
-                        // Favoriye eklenip eklenmediğini kontrol et
-                        Icons.favorite_border, // Varsayılan favori ikonu
-                        color: Colors.red, // Favoriye ekli ise kırmızı olabilir
+                        isFavorite ? Icons.favorite : Icons.favorite_border,
+                        color: Colors.red,
                       ),
                       onPressed: () {
-                        onFavoriteTap?.call(); // Favoriye ekleme fonksiyonu çalıştırılıyor
+                        onFavoriteTap?.call();
                       },
                     ),
                   ),

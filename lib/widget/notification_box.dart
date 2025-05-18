@@ -19,14 +19,14 @@ class _NotificationBoxState extends State<NotificationBox> {
     final type = data['type'];
     final relatedId = data['relatedId'];
 
-    if (type == 'comment') {
-      Navigator.push(
-        context,
-        MaterialPageRoute(
+    /*if (type == 'comment') {
+    //  Navigator.push(
+      //  context,
+        //MaterialPageRoute(
           builder: (ctx) => ForumPage(postId: relatedId),
         ),
       );
-    }
+    }*/
 
     if (!(data['isRead'] ?? false)) {
       _markAsRead(data['docId']);

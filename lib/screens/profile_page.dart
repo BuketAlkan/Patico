@@ -3,11 +3,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:firebase_storage/firebase_storage.dart';
-import 'package:patico/screens/pet_detailpage.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
 import 'dart:io';
 
 import '../services/auth_provider.dart';
+import 'package:patico/screens/pet_detailpage.dart';
 
 class ProfilePage extends ConsumerStatefulWidget {
   const ProfilePage({super.key});
@@ -21,27 +22,65 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
   String? _imageUrl;
 
   Future<void> _changeProfilePicture() async {
-    final pickedFile = await _picker.pickImage(source: ImageSource.gallery);
+    final source = await showDialog<ImageSource>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Fotoğraf Seç'),
+        content: const Text('Profil fotoğrafınızı nereden seçmek istersiniz?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, ImageSource.camera),
+            child: const Text('Kamera'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, ImageSource.gallery),
+            child: const Text('Galeri'),
+          ),
+        ],
+      ),
+    );
+
+    if (source == null) return;
+
+    final pickedFile = await _picker.pickImage(source: source);
     if (pickedFile == null) return;
 
     try {
-      final uid = FirebaseAuth.instance.currentUser!.uid;
-      final storageRef = FirebaseStorage.instance
-          .ref()
-          .child("profile_pictures/$uid.jpg");
+      final imageBytes = await File(pickedFile.path).readAsBytes();
+      final base64Image = base64Encode(imageBytes);
 
-      await storageRef.putFile(File(pickedFile.path));
-      String downloadUrl = await storageRef.getDownloadURL();
+      final response = await http.post(
+        Uri.parse('https://api.imgbb.com/1/upload?key=984d720ca4875a9e9aede1fbb12b0ccb'),
+        body: {'image': base64Image},
+      );
 
-      // Firestore ve Auth güncelle
-      await FirebaseFirestore.instance.collection('users').doc(uid).update({'photoURL': downloadUrl});
-      await FirebaseAuth.instance.currentUser!.updatePhotoURL(downloadUrl);
+      final responseData = json.decode(response.body);
+      if (response.statusCode == 200 && responseData['data']['url'] != null) {
+        final imageUrl = responseData['data']['url'];
+        final user = FirebaseAuth.instance.currentUser!;
+        final uid = user.uid;
 
-      setState(() => _imageUrl = downloadUrl);
+        // Firestore'da kullanıcı belgesi varsa güncelle, yoksa oluştur
+        final userDocRef = FirebaseFirestore.instance.collection('users').doc(uid);
+        await userDocRef.set({'photoURL': imageUrl}, SetOptions(merge: true));
+
+        // Firebase Authentication profilini güncelle
+        await user.updatePhotoURL(imageUrl);
+
+        setState(() {
+          _imageUrl = imageUrl;
+        });
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Profil fotoğrafı başarıyla güncellendi")),
+        );
+      } else {
+        throw Exception("ImgBB yükleme hatası: ${response.body}");
+      }
     } catch (e) {
-      print("Resim yükleme hatası: $e");
+      print("Profil fotoğrafı yüklenirken hata: $e");
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Profil resmi güncellenirken hata oluştu")),
+        const SnackBar(content: Text("Profil fotoğrafı güncellenirken bir hata oluştu")),
       );
     }
   }
@@ -50,7 +89,6 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
     try {
       final batch = FirebaseFirestore.instance.batch();
 
-      // Tüm kullanıcıların favorilerinde ilanı sil
       final allUsers = await FirebaseFirestore.instance.collection('Favorites').get();
       for (var userDoc in allUsers.docs) {
         final userFavorites = await FirebaseFirestore.instance
@@ -65,9 +103,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
         }
       }
 
-      // İlanı sil
       batch.delete(FirebaseFirestore.instance.collection(collection).doc(adId));
-
       await batch.commit();
 
       print("İlan ve favoriler başarıyla silindi!");
@@ -225,10 +261,11 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
   Widget _buildProfileHeader(User user, Map<String, dynamic> userData) {
     final profileImageUrl = _imageUrl?.isNotEmpty == true
         ? _imageUrl!
+        : (userData['photoURL']?.isNotEmpty == true
+        ? userData['photoURL']
         : (user.photoURL?.isNotEmpty == true
         ? user.photoURL!
-        : 'https://via.placeholder.com/150');
-
+        : 'https://via.placeholder.com/150'));
     return Column(
       children: [
         Stack(
