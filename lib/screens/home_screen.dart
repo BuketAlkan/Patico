@@ -2,21 +2,18 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/cupertino.dart';
-import 'package:flutter/cupertino.dart';
-import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/material.dart';
-import 'package:flutter/widgets.dart';
 import 'package:flutter/widgets.dart';
 import 'package:geocoding/geocoding.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:patico/screens/forum_page.dart';
 import 'package:patico/screens/login.dart';
 import 'package:patico/screens/pet_detailpage.dart';
 import 'package:patico/screens/profile_page.dart';
+import 'package:patico/screens/reminder_list_page.dart';
 import 'package:patico/screens/settings_page.dart';
 import 'package:patico/theme/colors.dart';
-import 'package:patico/utils/data.dart';
 import 'package:patico/widget/notification_box.dart';
 import 'package:patico/widget/pet_item.dart';
 import 'package:patico/screens/ad_page.dart';
@@ -25,6 +22,9 @@ import 'package:patico/screens/favorites_page.dart';
 import 'package:patico/screens/chat.dart';
 import 'package:patico/widget/custom_bottom_navbar.dart';
 import 'package:smooth_page_indicator/smooth_page_indicator.dart';
+
+import '../widget/VetMapWidget.dart';
+
 class HomePage extends StatefulWidget {
   const HomePage({Key? key}) : super(key: key);
 
@@ -63,6 +63,8 @@ class _HomePageState extends State<HomePage> {
     _setupFirebaseMessaging();
     _fetchUserLocation();
     _fetchUserDetails();
+    updateUserCityFromCoordinates();
+
   }
 
   void _updatePages() {
@@ -103,13 +105,28 @@ class _HomePageState extends State<HomePage> {
     if (user == null) return;
 
     final token = await FirebaseMessaging.instance.getToken();
-    if (token != null) {
-      await FirebaseFirestore.instance.collection('users').doc(user.uid).update({
-        'fcmToken': token,
-      });
-      print('📲 Token Firestore\'a kaydedildi: $token');
+    if (token == null) return;
+
+    final firestore = FirebaseFirestore.instance;
+
+    // 1. Bu token başka kullanıcıda varsa, sil
+    final query = await firestore
+        .collection('users')
+        .where('fcmToken', isEqualTo: token)
+        .get();
+
+    for (var doc in query.docs) {
+      if (doc.id != user.uid) {
+        await firestore.collection('users').doc(doc.id).update({'fcmToken': FieldValue.delete()});
+        print('❌ $token diğer kullanıcıdan silindi: ${doc.id}');
+      }
     }
+
+    // 2. Kendi kullanıcı tokenını güncelle
+    await firestore.collection('users').doc(user.uid).set({'fcmToken': token}, SetOptions(merge: true));
+    print('📲 Token güncellendi: $token');
   }
+
 
   void _setupFirebaseMessaging() {
     FirebaseMessaging.onMessage.listen((RemoteMessage message) {
@@ -121,10 +138,49 @@ class _HomePageState extends State<HomePage> {
     });
   }
 
+
+// İzinleri kontrol eden ve isteyen fonksiyon
+  Future<bool> _handleLocationPermission() async {
+    LocationPermission permission;
+
+    permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+      if (permission == LocationPermission.denied) {
+        print('Konum izni reddedildi');
+        return false;
+      }
+    }
+
+    if (permission == LocationPermission.deniedForever) {
+      print('Konum izni kalıcı olarak reddedildi. Ayarlardan açmalısın.');
+      return false;
+    }
+
+    return true;
+  }
+
+// Konumu çekip Firestore'dan veriyi güncelleyen veya okuyan fonksiyon
   Future<void> _fetchUserLocation() async {
+    bool hasPermission = await _handleLocationPermission();
+    if (!hasPermission) return;
+
+    // Konumu alıyoruz
+    Position position = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high);
+
     String? userId = FirebaseAuth.instance.currentUser?.uid;
     if (userId != null) {
       try {
+        // Koordinatları Firestore'a kaydet (opsiyonel, eğer kaydetmek istiyorsan)
+        await FirebaseFirestore.instance.collection('users').doc(userId).set({
+          'location': {
+            'latitude': position.latitude,
+            'longitude': position.longitude,
+          }
+        }, SetOptions(merge: true));
+
+        // Firestore'dan konumu tekrar okuyup şehir ismini al
         DocumentSnapshot userDoc = await FirebaseFirestore.instance
             .collection('users')
             .doc(userId)
@@ -139,7 +195,13 @@ class _HomePageState extends State<HomePage> {
                 location['latitude'], location['longitude']);
             setState(() {
               userCity = city;
-              _updatePages();
+              print("Firestore’dan gelen şehir: $city");
+
+              _pages[0] = _HomeContent(
+                userCity: userCity,
+                notifications: notifications,
+                notifiedCount: notifiedCount,
+              );
             });
           }
         }
@@ -152,11 +214,59 @@ class _HomePageState extends State<HomePage> {
   Future<String> getCityFromCoordinates(double lat, double lng) async {
     try {
       List<Placemark> placemarks = await placemarkFromCoordinates(lat, lng);
-      return placemarks.first.locality ?? "Bilinmeyen Şehir";
+      if (placemarks.isNotEmpty) {
+        Placemark place = placemarks.first;
+
+        print("Placemark detayları:");
+        print("name: ${place.name}");
+        print("locality: ${place.locality}");
+        print("subAdministrativeArea: ${place.subAdministrativeArea}");
+        print("administrativeArea: ${place.administrativeArea}");
+        print("country: ${place.country}");
+        print("postalCode: ${place.postalCode}");
+
+        String? city = place.locality?.trim().isNotEmpty == true
+            ? place.locality
+            : place.subAdministrativeArea?.trim().isNotEmpty == true
+            ? place.subAdministrativeArea
+            : place.administrativeArea?.trim().isNotEmpty == true
+            ? place.administrativeArea
+            : null;
+
+        return city ?? "Bilinmeyen Şehir";
+      } else {
+        return "Bilinmeyen Şehir";
+      }
     } catch (e) {
+      print("Şehir alınırken hata oluştu: $e");
       return "Şehir Bulunamadı";
     }
   }
+  Future<void> updateUserCityFromCoordinates() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    final userDoc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
+
+    if (!userDoc.exists) return;
+
+    final data = userDoc.data();
+    if (data == null) return;
+
+    final lat = data['location']?['latitude'];
+    final lng = data['location']?['longitude'];
+
+    if (lat == null || lng == null) return;
+
+    String city = await getCityFromCoordinates(lat, lng);
+
+    await FirebaseFirestore.instance.collection('users').doc(user.uid).update({
+      'city': city,
+    });
+
+    print("Kullanıcının şehri Firestore'da güncellendi: $city");
+  }
+
 
   Future<void> _fetchUserDetails() async {
     String? userId = FirebaseAuth.instance.currentUser?.uid;
@@ -201,6 +311,7 @@ class _HomePageState extends State<HomePage> {
         onTap: (index) => setState(() => _currentIndex = index),
       ),
       floatingActionButton: FloatingActionButton(
+        heroTag: 'uniqueTag1',
         backgroundColor: AppColor.primary,
         onPressed: () => Navigator.push(
           context,
@@ -255,10 +366,14 @@ class _HomePageState extends State<HomePage> {
               _buildDrawerItem(Icons.mode_comment_rounded, "Forum", () {
                 Navigator.push(context, MaterialPageRoute(builder: (context) => ForumPage()));
               }),
+              _buildDrawerItem(Icons.access_alarm_rounded, "Hatırlatıcı", () {
+                Navigator.push(context, MaterialPageRoute(builder: (context) => ReminderListPage()));
+              }),
               const Spacer(),
               const Divider(),
               _buildDrawerItem(Icons.logout, "Çıkış Yap", () async {
                 await FirebaseAuth.instance.signOut();
+                await removeDeviceTokenOnSignOut();
                 Navigator.pushReplacement(
                   context,
                   MaterialPageRoute(builder: (context) => const LoginScreen()),
@@ -269,6 +384,19 @@ class _HomePageState extends State<HomePage> {
         },
       ),
     );
+  }
+  Future<void> removeDeviceTokenOnSignOut() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    await FirebaseFirestore.instance
+        .collection('users')
+        .doc(user.uid)
+        .update({'fcmToken': FieldValue.delete()});
+
+    print('📲 Kullanıcı çıkış yaptı, token silindi.');
+
+    await FirebaseAuth.instance.signOut();
   }
 
 
@@ -339,7 +467,7 @@ class _HomeContent extends StatelessWidget {
               ),
               const SizedBox(height: 3),
               Text(
-                userCity.isEmpty ? "Konum yükleniyor..." : userCity,
+                (userCity == null || userCity!.isEmpty) ? "Konum yükleniyor..." : userCity!,
                 style: TextStyle(
                   color: AppColor.textColor,
                   fontWeight: FontWeight.w500,
@@ -402,6 +530,7 @@ class _HomeContent extends StatelessWidget {
   }
 
 
+
   Widget _buildBody(BuildContext context) {
     return SingleChildScrollView(
       child: Padding(
@@ -410,10 +539,45 @@ class _HomeContent extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const SizedBox(height: 25),
-            _buildSectionWithPets(
-                "Sahiplendirme İlanları", "Sahiplenme", context),
+            _buildSectionWithPets("Sahiplendirme İlanları", "Sahiplenme", context),
             const SizedBox(height: 20),
             _buildSectionWithPets("Bakım İlanları", "Bakım", context),
+
+            // Yeni eklenen Veteriner Haritası Bölümü
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    "Yakındaki Veterinerler",
+                    style: TextStyle(
+                      color: AppColor.textColor,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 24,
+                    ),
+                  ),
+                  const SizedBox(height: 15),
+                  Container(
+                    height: 300,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(15),
+                      boxShadow: [
+                        BoxShadow(
+                            color: Colors.black12,
+                            blurRadius: 6,
+                            spreadRadius: 2
+                        )
+                      ],
+                    ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(15),
+                      child: VetMapWidget(),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ],
         ),
       ),
@@ -434,28 +598,40 @@ class _HomeContent extends StatelessWidget {
     return snapshot.docs.map((doc) => doc.data()).toList();
   }
 
-  void _toggleFavorite(Map<String, dynamic> petData) async {
-    final userId = FirebaseAuth.instance.currentUser?.uid;
-    if (userId == null) return;
+  Future<void> _toggleFavorite(String adId) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
 
-    final petId = petData['adId'];
+    final favDocRef = FirebaseFirestore.instance
+        .collection('Favorites')
+        .doc(user.uid)
+        .collection('UserFavorites')
+        .doc(adId);
 
-    final favoritesRef = FirebaseFirestore.instance.collection('Favorites').doc(
-        userId);
-    final favoriteDoc = await favoritesRef.get();
-
-    if (favoriteDoc.exists) {
-      final favoriteList = List.from(favoriteDoc['petIds'] ?? []);
-      if (favoriteList.contains(petId)) {
-        favoriteList.remove(petId);
-      } else {
-        favoriteList.add(petId);
-      }
-
-      await favoritesRef.update({'petIds': favoriteList});
+    final snapshot = await favDocRef.get();
+    if (snapshot.exists) {
+      // Zaten favoride, kaldır
+      await favDocRef.delete();
     } else {
-      await favoritesRef.set({'petIds': [petId]});
+      // Favoriye ekle
+      await favDocRef.set({
+        'adId': adId,
+        'timestamp': FieldValue.serverTimestamp(),
+      });
     }
+  }
+
+  Stream<bool> _isFavoriteStream(String adId) {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return  Stream.value(false);
+
+    return FirebaseFirestore.instance
+        .collection('Favorites')
+        .doc(user.uid)
+        .collection('UserFavorites')
+        .doc(adId)
+        .snapshots()
+        .map((snap) => snap.exists);
   }
 
 
@@ -463,23 +639,24 @@ class _HomeContent extends StatelessWidget {
     final collectionName = type == 'Sahiplenme' ? 'Sahiplenme' : 'Bakım';
     final pageController = PageController(viewportFraction: 0.8);
     final currentPage = ValueNotifier<int>(0);
-    final userId = FirebaseAuth.instance.currentUser?.uid;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Başlık ve "Daha Fazla" butonu aynen kaldı
+        // Başlık ve "Daha Fazla" butonu
         Padding(
           padding: const EdgeInsets.fromLTRB(15, 0, 15, 15),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(title,
-                  style: TextStyle(
-                    color: AppColor.textColor,
-                    fontWeight: FontWeight.w700,
-                    fontSize: 24,
-                  )),
+              Text(
+                title,
+                style: TextStyle(
+                  color: AppColor.textColor,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 24,
+                ),
+              ),
               ElevatedButton(
                 onPressed: () => Navigator.push(
                   context,
@@ -492,8 +669,10 @@ class _HomeContent extends StatelessWidget {
                     borderRadius: BorderRadius.circular(20),
                   ),
                 ),
-                child: const Text("Daha Fazla",
-                    style: TextStyle(color: Colors.white, fontSize: 16)),
+                child: const Text(
+                  "Daha Fazla",
+                  style: TextStyle(color: Colors.white, fontSize: 16),
+                ),
               ),
             ],
           ),
@@ -518,7 +697,6 @@ class _HomeContent extends StatelessWidget {
               );
             }
 
-            // Her dokümandan bir Map çıkar ve adId olarak ID'yi set et
             final pets = docs.map((doc) {
               final data = doc.data()! as Map<String, dynamic>;
               data['adId'] = doc.id;
@@ -536,38 +714,123 @@ class _HomeContent extends StatelessWidget {
                       onPageChanged: (i) => currentPage.value = i,
                       itemBuilder: (context, index) {
                         final pet = pets[index];
-                        final adId = pet['adId'];
+                        final adId = pet['adId'] as String;
+                        final city = pet['city'] as String? ?? '';
 
-                        // Favori listesini dinleyen StreamBuilder
-                        return StreamBuilder<DocumentSnapshot>(
-                          stream: FirebaseFirestore.instance
-                              .collection('Favorites')
-                              .doc(userId)
-                              .snapshots(),
-                          builder: (context, favSnap) {
-                            bool isFav = false;
-                            if (favSnap.hasData && favSnap.data!.exists) {
-                              final favList = List<String>.from(
-                                  favSnap.data!['petIds'] ?? []);
-                              isFav = favList.contains(adId);
-                            }
-
-                            return Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 8.0),
-                              child: PetItem(
-                                data: pet,
-                                width: MediaQuery.of(context).size.width * 0.8,
-                                isFavorite: isFav,
-                                onTap: () => Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                      builder: (_) =>
-                                          PetDetailPage(adData: pet)),
+                        return Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 8.0),
+                          child: Container(
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFF3E5F5),
+                              borderRadius: BorderRadius.circular(15),
+                              boxShadow: [
+                                BoxShadow(
+                                    color: Colors.black12,
+                                    blurRadius: 6,
+                                    spreadRadius: 2)
+                              ],
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                // İlan Görseli
+                                ClipRRect(
+                                  borderRadius: const BorderRadius.vertical(
+                                      top: Radius.circular(15)),
+                                  child: Image.network(
+                                    pet['imageUrl'] ??
+                                        'https://cdn.pixabay.com/photo/2017/09/25/13/12/dog-2785074_1280.jpg',
+                                    height: 150,
+                                    width: double.infinity,
+                                    fit: BoxFit.cover,
+                                    errorBuilder: (_, __, ___) => Container(
+                                      height: 150,
+                                      color: Colors.grey[200],
+                                      child: const Icon(Icons.pets,
+                                          size: 50, color: Colors.grey),
+                                    ),
+                                  ),
                                 ),
-                                onFavoriteTap: () => _toggleFavorite(pet),
-                              ),
-                            );
-                          },
+
+                                // Kart içeriği - GestureDetector ile sarmalayıp tıklamayı ekledik
+                                Padding(
+                                  padding: const EdgeInsets.all(12.0),
+                                  child: GestureDetector(
+                                    onTap: () {
+                                      Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (context) =>
+                                              PetDetailPage(adData: pet),
+                                        ),
+                                      );
+                                    },
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        // Başlık
+                                        Text(
+                                          pet['title'] ?? 'Başlıksız',
+                                          style: const TextStyle(
+                                              fontSize: 18,
+                                              fontWeight: FontWeight.w600),
+                                        ),
+                                        const SizedBox(height: 6),
+                                        // Açıklama
+                                        Text(
+                                          pet['description'] ?? '',
+                                          maxLines: 2,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                        const SizedBox(height: 6),
+                                        // Şehir bilgisi
+                                        if (city.isNotEmpty)
+                                          Row(
+                                            children: [
+                                              Icon(Icons.location_on,
+                                                  size: 14,
+                                                  color: Colors.grey[600]),
+                                              const SizedBox(width: 4),
+                                              Flexible(
+                                                child: Text(
+                                                  city,
+                                                  style: TextStyle(
+                                                      fontSize: 12,
+                                                      color: Colors.grey[600]),
+                                                  overflow: TextOverflow.ellipsis,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        const SizedBox(height: 8),
+                                        // Favori butonu
+                                        Align(
+                                          alignment: Alignment.centerRight,
+                                          child: StreamBuilder<bool>(
+                                            stream: _isFavoriteStream(adId),
+                                            initialData: false,
+                                            builder: (context, favSnap) {
+                                              final isFav = favSnap.data ?? false;
+                                              return IconButton(
+                                                icon: Icon(
+                                                  isFav
+                                                      ? Icons.favorite
+                                                      : Icons.favorite_border,
+                                                  color:
+                                                  isFav ? Colors.red : Colors.grey,
+                                                ),
+                                                onPressed: () => _toggleFavorite(adId),
+                                              );
+                                            },
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
                         );
                       },
                     ),
@@ -593,5 +856,6 @@ class _HomeContent extends StatelessWidget {
       ],
     );
   }
+
 
 }

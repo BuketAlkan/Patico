@@ -18,10 +18,23 @@ class ChatPage extends StatelessWidget {
   Future<String?> getUserPhotoUrl(String userId) async {
     final doc = await FirebaseFirestore.instance.collection('users').doc(userId).get();
     if (doc.exists && doc.data() != null) {
-      return doc.data()!['photoURL'];  // Burada photoURL olarak değişti
+      return doc.data()!['photoURL'];
     } else {
       return null;
     }
+  }
+
+  Future<void> deleteChat(String chatId) async {
+    final chatDoc = FirebaseFirestore.instance.collection('chats').doc(chatId);
+
+    // Alt koleksiyon 'messages' içindeki tüm mesajları sil
+    final messagesSnapshot = await chatDoc.collection('messages').get();
+    for (final doc in messagesSnapshot.docs) {
+      await doc.reference.delete();
+    }
+
+    // Sohbet dokümanını sil
+    await chatDoc.delete();
   }
 
   @override
@@ -79,6 +92,35 @@ class ChatPage extends StatelessWidget {
                         ),
                       );
                     },
+                    trailing: IconButton(
+                      icon: const Icon(Icons.delete, color: Colors.red),
+                      onPressed: () async {
+                        final confirm = await showDialog<bool>(
+                          context: context,
+                          builder: (ctx) => AlertDialog(
+                            title: const Text('Sohbeti sil'),
+                            content: const Text('Bu sohbeti silmek istediğinize emin misiniz?'),
+                            actions: [
+                              TextButton(
+                                onPressed: () => Navigator.of(ctx).pop(false),
+                                child: const Text('İptal'),
+                              ),
+                              TextButton(
+                                onPressed: () => Navigator.of(ctx).pop(true),
+                                child: const Text('Sil'),
+                              ),
+                            ],
+                          ),
+                        );
+
+                        if (confirm == true) {
+                          await deleteChat(chat.id);
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Sohbet silindi')),
+                          );
+                        }
+                      },
+                    ),
                   );
                 },
               );

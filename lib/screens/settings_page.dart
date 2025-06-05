@@ -31,7 +31,7 @@ class _SettingsPageState extends State<SettingsPage> {
     if (user != null) {
       final doc = await _firestore.collection('users').doc(user.uid).get();
       setState(() {
-        _username = doc['name'] ?? '';
+        _username = doc.data()?['name'] ?? '';
         _email = user.email ?? '';
       });
     }
@@ -131,17 +131,20 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
           ElevatedButton(
             onPressed: () async {
+              final oldPass = passwordController.text.trim();
+              final newPass = newPasswordController.text.trim();
+
+              if (oldPass.isEmpty || newPass.isEmpty) {
+                _showError('Lütfen tüm alanları doldurun');
+                return;
+              }
+
               try {
-                // Kimlik doğrulama
-                await _reauthenticate(passwordController.text);
+                await _reauthenticate(user, oldPass);
+                await user.updatePassword(newPass);
 
-                // Firebase Authentication şifre güncelleme
-                await user.updatePassword(newPasswordController.text);
-
-                // Firestore'a düz metin şifreyi yazma (GÜVENLİ DEĞİL - sadece test için)
-                await _firestore.collection('users').doc(user.uid).update({
-                  'password': newPasswordController.text,
-                });
+                // NOT: Şifre Firestore'da saklanmamalı! Sadece test amaçlı ise izin ver.
+                // await _firestore.collection('users').doc(user.uid).update({'password': newPass});
 
                 Navigator.pop(context);
                 _showSuccess('Şifre başarıyla değiştirildi');
@@ -190,16 +193,27 @@ class _SettingsPageState extends State<SettingsPage> {
           ElevatedButton(
             onPressed: () async {
               final newEmail = emailController.text.trim();
+              final password = passwordController.text.trim();
+
+              if (newEmail.isEmpty || password.isEmpty) {
+                _showError('Lütfen tüm alanları doldurun');
+                return;
+              }
+
               try {
-                await _reauthenticate(passwordController.text);
+                await _reauthenticate(user, password);
 
-                await user.verifyBeforeUpdateEmail(newEmail);
+                await user.updateEmail(newEmail);
+                await _firestore.collection('users').doc(user.uid).update({
+                  'email': newEmail,
+                });
 
-                // Firestore'u hemen güncellemiyoruz çünkü değişiklik henüz Auth'da onaylanmadı.
-                // Eğer hemen değişmesini istiyorsan, kullanıcı doğruladıktan sonra uygulamayı yeniden başlatabiliriz.
+                setState(() {
+                  _email = newEmail;
+                });
 
                 Navigator.pop(context);
-                _showSuccess('Yeni e-posta için doğrulama gönderildi. Lütfen gelen kutunu kontrol et.');
+                _showSuccess('E-posta başarıyla güncellendi');
               } catch (e) {
                 _showError('Hata: ${e.toString()}');
               }
@@ -211,12 +225,11 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
-
   Future<void> _changeUsername() async {
     final user = _auth.currentUser;
     if (user == null) return;
 
-    final usernameController = TextEditingController();
+    final usernameController = TextEditingController(text: _username);
 
     await showDialog(
       context: context,
@@ -230,13 +243,26 @@ class _SettingsPageState extends State<SettingsPage> {
           TextButton(onPressed: () => Navigator.pop(context), child: const Text('İptal')),
           ElevatedButton(
             onPressed: () async {
+              final newUsername = usernameController.text.trim();
+              if (newUsername.isEmpty) {
+                _showError('Kullanıcı adı boş olamaz');
+                return;
+              }
+
               try {
                 await _firestore.collection('users').doc(user.uid).update({
-                  'name': usernameController.text,
+                  'name': newUsername,
                 });
-                setState(() => _username = usernameController.text);
+
+                setState(() {
+                  _username = newUsername;
+                });
+
+                // Forum ve yorumlarda kullanıcı adını da güncelle
+                await ForumService.updateUsernameEverywhere(newUsername);
+
                 Navigator.pop(context);
-                _showSuccess('Kullanıcı adı güncellendi');
+                _showSuccess('Kullanıcı adı başarıyla güncellendi');
               } catch (e) {
                 _showError('Hata: ${e.toString()}');
               }
@@ -245,20 +271,6 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
         ],
       ),
-    );
-  }
-  Future<void> _updateUsername(String newUsername) async {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return;
-
-    final userRef = FirebaseFirestore.instance.collection('users').doc(user.uid);
-    await userRef.update({'name': newUsername});
-
-    // 🔁 Forum ve yorumlarda kullanıcı adını güncelle
-    await ForumService.updateUsernameEverywhere(newUsername);
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text("Kullanıcı adı başarıyla güncellendi.")),
     );
   }
 
@@ -270,7 +282,7 @@ class _SettingsPageState extends State<SettingsPage> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Hesabı Sil'),
-        content: const Text('Bu işlem geri alınamaz!'),
+        content: const Text('Bu işlem geri alınamaz! Emin misiniz?'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('İptal')),
           TextButton(
@@ -285,6 +297,7 @@ class _SettingsPageState extends State<SettingsPage> {
       try {
         await _firestore.collection('users').doc(user.uid).delete();
         await user.delete();
+
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(builder: (_) => const LoginScreen()),
@@ -295,24 +308,20 @@ class _SettingsPageState extends State<SettingsPage> {
     }
   }
 
-  Future<void> _reauthenticate(String password) async {
-    final user = _auth.currentUser!;
-    final cred = EmailAuthProvider.credential(
-      email: user.email!,
-      password: password,
-    );
+  Future<void> _reauthenticate(User user, String password) async {
+    final cred = EmailAuthProvider.credential(email: user.email!, password: password);
     await user.reauthenticateWithCredential(cred);
-  }
-
-  void _showSuccess(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message), backgroundColor: Colors.green),
-    );
   }
 
   void _showError(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(message), backgroundColor: Colors.red),
+    );
+  }
+
+  void _showSuccess(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message), backgroundColor: Colors.green),
     );
   }
 }

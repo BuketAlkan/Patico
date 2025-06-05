@@ -22,6 +22,11 @@ class _CreateAdPageState extends ConsumerState<CreateAdPage> {
   final _priceController = TextEditingController();
   XFile? _image;
   bool _isImagePicked = false;
+  String userCity = '';
+
+  // Tür (species) için state
+  final List<String> _speciesOptions = ['Köpek', 'Kedi', 'Kuş', 'Diğer'];
+  String _selectedSpecies = 'Köpek';
 
   Future<void> _pickImage() async {
     final picker = ImagePicker();
@@ -35,7 +40,7 @@ class _CreateAdPageState extends ConsumerState<CreateAdPage> {
   }
 
   Future<String?> _uploadToImgbb(File imageFile) async {
-    const String imgbbApiKey = '984d720ca4875a9e9aede1fbb12b0ccb'; // 🔑 imgbb API anahtarını buraya ekle
+    const String imgbbApiKey = '984d720ca4875a9e9aede1fbb12b0ccb';
     final url = Uri.parse("https://api.imgbb.com/1/upload?key=$imgbbApiKey");
 
     final base64Image = base64Encode(await imageFile.readAsBytes());
@@ -75,12 +80,16 @@ class _CreateAdPageState extends ConsumerState<CreateAdPage> {
     final userId = user.uid;
     final adType = ref.read(adTypeProvider);
 
-    DocumentSnapshot userDoc =
-    await FirebaseFirestore.instance.collection('users').doc(userId).get();
+    DocumentSnapshot userDoc = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(userId)
+        .get();
     String userName = userDoc.exists ? userDoc['name'] : 'Anonim';
+    String userCity = userDoc.exists ? userDoc['city'] ?? '' : '';
 
-    DocumentReference adRef =
-    await FirebaseFirestore.instance.collection(adType).add({
+    DocumentReference adRef = await FirebaseFirestore.instance
+        .collection(adType)
+        .add({
       'title': _titleController.text,
       'description': _descriptionController.text,
       'price': adType == 'Bakım' ? _priceController.text : null,
@@ -88,6 +97,8 @@ class _CreateAdPageState extends ConsumerState<CreateAdPage> {
       'userName': userName,
       'imageUrl': imageUrl,
       'createdAt': Timestamp.now(),
+      'species': _selectedSpecies,
+      'city': userCity,// Tür bilgisi kaydediliyor
     });
 
     await adRef.update({'adId': adRef.id});
@@ -98,6 +109,7 @@ class _CreateAdPageState extends ConsumerState<CreateAdPage> {
       _priceController.clear();
       _image = null;
       _isImagePicked = false;
+      _selectedSpecies = _speciesOptions.first;
     });
 
     ScaffoldMessenger.of(context).showSnackBar(
@@ -122,6 +134,22 @@ class _CreateAdPageState extends ConsumerState<CreateAdPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // Tür seçimi butonları
+            Text('Tür Seçimi', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              children: _speciesOptions.map((s) {
+                final isSelected = s == _selectedSpecies;
+                return ChoiceChip(
+                  label: Text(s),
+                  selected: isSelected,
+                  selectedColor: Colors.blue.shade200,
+                  onSelected: (_) => setState(() => _selectedSpecies = s),
+                );
+              }).toList(),
+            ),
+            SizedBox(height: 16),
             GestureDetector(
               onTap: _pickImage,
               child: Container(

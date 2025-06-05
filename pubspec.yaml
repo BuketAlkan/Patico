@@ -37,6 +37,7 @@ dependencies:
   cupertino_icons: ^1.0.2
   firebase_core:
   firebase_storage:
+  flutter_launcher_icons:
   firebase_auth:
   firebase_messaging: ^14.7.0
   flutter_local_notifications:
@@ -44,7 +45,7 @@ dependencies:
   google_sign_in: ^5.4.0
   cached_network_image: ^3.1.0
   smooth_page_indicator: ^1.0.0+2
-
+  firebase_app_check:
   google_fonts: ^2.1.1
   flutter_svg: ^2.0.0
   glassmorphism_ui: ^0.2.0
@@ -54,7 +55,12 @@ dependencies:
   flutter_riverpod:
   image_picker:
   http:
+  flutter_map:
+  timezone:
+  latlong2:
+  url_launcher:
   googleapis_auth:
+  intl:
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -83,7 +89,10 @@ flutter:
     - images/signup.jpg
     - assets/
 
-
+flutter_icons:
+  android: true
+  ios: true
+  image_path: "assets/icon/appicon.png"
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/assets-and-images/#resolution-aware

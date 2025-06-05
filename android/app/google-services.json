@@ -12,7 +12,20 @@
           "package_name": "com.example.patico"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "967348865143-4ccnces8r7p3gv3j04h25u2kleja3kdo.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.patico",
+            "certificate_hash": "34365b9fbeb2b20a9e67eeec489515bde300ba1c"
+          }
+        },
+        {
+          "client_id": "967348865143-vqjg7604h3a7u2rv9c6118f67m3m0jrt.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyAkoBQnD55jIAvda-USYsuhParUlmNMaA8"
@@ -20,7 +33,12 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "967348865143-vqjg7604h3a7u2rv9c6118f67m3m0jrt.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
         }
       }
     }

@@ -4,9 +4,12 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'pet_detailpage.dart';
 
 class FavoritesPage extends StatelessWidget {
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+
   @override
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
+
     if (user == null) {
       return Scaffold(
         appBar: AppBar(title: Text("Favorilerim")),
@@ -16,43 +19,67 @@ class FavoritesPage extends StatelessWidget {
 
     return Scaffold(
       appBar: AppBar(title: Text("Favorilerim")),
-      body: StreamBuilder(
-        stream: FirebaseFirestore.instance
+      body: StreamBuilder<QuerySnapshot>(
+        stream: _firestore
             .collection("Favorites")
             .doc(user.uid)
             .collection("UserFavorites")
+            .orderBy('timestamp', descending: true)
             .snapshots(),
-        builder: (context, AsyncSnapshot<QuerySnapshot> snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
+        builder: (context, favSnap) {
+          if (favSnap.connectionState == ConnectionState.waiting) {
             return Center(child: CircularProgressIndicator());
           }
-          if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-            return Center(child: Text("Favori ilanınız yok."));
+
+          final favDocs = favSnap.data?.docs ?? [];
+          if (favDocs.isEmpty) {
+            return Center(child: Text("Hiç favori ilanınız yok."));
           }
 
           return ListView.builder(
-            itemCount: snapshot.data!.docs.length,
+            itemCount: favDocs.length,
             itemBuilder: (context, index) {
-              var doc = snapshot.data!.docs[index];
-              var favData = doc.data() as Map<String, dynamic>;
-              String adId = doc.id;
+              final favDoc = favDocs[index];
+              final String adId = favDoc.id;
+              final String? collection =
+              favDoc.data().toString().contains('collection')
+                  ? favDoc.get('collection') as String
+                  : null;
 
-              return ListTile(
-                title: Text(favData["title"] ?? "İlan Başlığı Yok"),
-                leading: Image.network(
-                  favData["imageUrl"] ?? "https://cdn.pixabay.com/photo/2017/09/25/13/12/dog-2785074_1280.jpg",
-                  width: 50,
-                  height: 50,
-                  fit: BoxFit.cover,
-                ),
-                trailing: IconButton(
-                  icon: Icon(Icons.favorite, color: Colors.red),
-                  onPressed: () => _toggleFavorite(adId, user.uid, favData),
-                ),
-                onTap: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (context) => PetDetailPage(adData: favData)),
-                ),
+              return FutureBuilder<Map<String, dynamic>?>(
+                future: _fetchAdData(adId, collection: collection),
+                builder: (context, adSnap) {
+                  if (adSnap.connectionState == ConnectionState.waiting) {
+                    return ListTile(title: Text("Yükleniyor..."));
+                  }
+
+                  final adData = adSnap.data;
+                  if (adData == null) {
+                    return ListTile(title: Text("İlan bulunamadı"));
+                  }
+
+                  final title = adData['title'] as String? ?? 'Başlık yok';
+                  final imageUrl = adData['imageUrl'] as String? ?? '';
+
+                  return ListTile(
+                    leading: imageUrl.isNotEmpty
+                        ? Image.network(imageUrl, width: 50, height: 50, fit: BoxFit.cover)
+                        : Icon(Icons.pets),
+                    title: Text(title),
+                    trailing: IconButton(
+                      icon: Icon(Icons.favorite, color: Colors.red),
+                      onPressed: () => _toggleFavorite(adId, user.uid),
+                    ),
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => PetDetailPage(adData: adData),
+                        ),
+                      );
+                    },
+                  );
+                },
               );
             },
           );
@@ -61,18 +88,52 @@ class FavoritesPage extends StatelessWidget {
     );
   }
 
-  void _toggleFavorite(String adId, String userId, Map<String, dynamic> adData) async {
-    final favRef = FirebaseFirestore.instance
+  /// Belirtilen koleksiyona göre ya da her iki koleksiyonu kontrol ederek ilan verisini getirir
+  Future<Map<String, dynamic>?> _fetchAdData(String adId, {String? collection}) async {
+    if (collection != null) {
+      final doc = await _firestore.collection(collection).doc(adId).get();
+      if (doc.exists && doc.data() != null) {
+        final data = Map<String, dynamic>.from(doc.data()!);
+        data['adId'] = adId;
+        return data;
+      }
+    } else {
+      // Koleksiyon belirtilmediyse her iki koleksiyonda ara
+      final sahDoc = await _firestore.collection('Sahiplenme').doc(adId).get();
+      if (sahDoc.exists && sahDoc.data() != null) {
+        final data = Map<String, dynamic>.from(sahDoc.data()!);
+        data['adId'] = adId;
+        return data;
+      }
+
+      final bakDoc = await _firestore.collection('Bakım').doc(adId).get();
+      if (bakDoc.exists && bakDoc.data() != null) {
+        final data = Map<String, dynamic>.from(bakDoc.data()!);
+        data['adId'] = adId;
+        return data;
+      }
+    }
+
+    return null;
+  }
+
+  /// Favori ekleme/silme işlemi
+  Future<void> _toggleFavorite(String adId, String userId) async {
+    final favRef = _firestore
         .collection("Favorites")
         .doc(userId)
         .collection("UserFavorites")
         .doc(adId);
 
-    final docSnapshot = await favRef.get();
-    if (docSnapshot.exists) {
-      await favRef.delete(); // Favoriden çıkar
+    final snapshot = await favRef.get();
+    if (snapshot.exists) {
+      await favRef.delete();
     } else {
-      await favRef.set(adData); // Favorilere ekle
+      await favRef.set({
+        'timestamp': FieldValue.serverTimestamp(),
+        // İsteğe bağlı: hangi koleksiyona ait olduğunu da kaydedebilirsin
+        // 'collection': 'Sahiplenme' veya 'Bakim'
+      });
     }
   }
 }

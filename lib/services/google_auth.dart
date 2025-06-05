@@ -4,11 +4,10 @@ import 'package:google_sign_in/google_sign_in.dart';
 class FirebaseServices {
   final auth = FirebaseAuth.instance;
   final googleSignIn = GoogleSignIn();
-  // dont't gorget to add firebasea auth and google sign in package
-  signInWithGoogle() async {
+
+  Future<bool> signInWithGoogle() async {
     try {
-      final GoogleSignInAccount? googleSignInAccount =
-      await googleSignIn.signIn();
+      final GoogleSignInAccount? googleSignInAccount = await googleSignIn.signIn();
       if (googleSignInAccount != null) {
         final GoogleSignInAuthentication googleSignInAuthentication =
         await googleSignInAccount.authentication;
@@ -17,15 +16,21 @@ class FirebaseServices {
           idToken: googleSignInAuthentication.idToken,
         );
         await auth.signInWithCredential(authCredential);
+        return true;  // Başarılı giriş
       }
+      return false; // Kullanıcı girişten vazgeçti
     } on FirebaseAuthException catch (e) {
-      print(e.toString());
+      print('FirebaseAuthException: $e');
+      return false;
+    } catch (e) {
+      print('Error during Google Sign-In: $e');
+      return false;
     }
   }
 
-// for sign out
-  googleSignOut() async {
+  // for sign out
+  Future<void> googleSignOut() async {
     await googleSignIn.signOut();
-    auth.signOut();
+    await auth.signOut();
   }
 }

@@ -7,6 +7,8 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:http/http.dart' as http;
 
+import 'my_forum_posts.dart';
+
 class ForumPage extends StatefulWidget {
   const ForumPage({Key? key}) : super(key: key);
 
@@ -67,11 +69,16 @@ class _ForumPageState extends State<ForumPage> {
       uploadedImageUrl = await _uploadImageToImgbb(_selectedImage!);
     }
 
-    await _firestore.collection('forumPosts').add({
+    final newPostRef = await _firestore.collection('forumPosts').add({
       'question': questionText,
       'userId': user.uid,
       'imageUrl': uploadedImageUrl ?? '',
       'timestamp': FieldValue.serverTimestamp(),
+    });
+
+    // postId'yi de Firestore dokümanına ekle (gerekirse yorumlara referans için kullanılır)
+    await newPostRef.update({
+      'postId': newPostRef.id,
     });
 
     _questionController.clear();
@@ -83,16 +90,25 @@ class _ForumPageState extends State<ForumPage> {
   String _formatTimestamp(Timestamp? timestamp) {
     if (timestamp == null) return '';
     final dt = timestamp.toDate();
-    return '${dt.day.toString().padLeft(2, '0')}.${dt.month.toString().padLeft(2, '0')}.${dt.year} ${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+    return '${dt.day.toString().padLeft(2, '0')}.${dt.month.toString().padLeft(
+        2, '0')}.${dt.year} ${dt.hour.toString().padLeft(2, '0')}:${dt.minute
+        .toString().padLeft(2, '0')}';
   }
 
   @override
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFFFF0F5),
+      backgroundColor: const Color(0xFFFFF0F5), // Pastel pembe arka plan
       appBar: AppBar(
         backgroundColor: const Color(0xFFFFC0CB),
-        title: const Text('🐾 Patili Forum', style: TextStyle(fontWeight: FontWeight.bold)),
+        title: const Text(
+          '🐾 Patili Forum',
+          style: TextStyle(
+            fontWeight: FontWeight.bold,
+            color: Colors.white, // Beyaz yazı
+          ),
+        ),
       ),
       body: Column(
         children: [
@@ -116,7 +132,8 @@ class _ForumPageState extends State<ForumPage> {
                       ),
                     ),
                     IconButton(
-                      icon: const Icon(Icons.photo),
+                      icon: const Icon(Icons.photo, color: Color(0xFFFF69B4)),
+                      // Pembe ikon
                       onPressed: _pickImage,
                     ),
                     ElevatedButton.icon(
@@ -125,7 +142,10 @@ class _ForumPageState extends State<ForumPage> {
                       label: const Text('Paylaş'),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: const Color(0xFFFFB6C1),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(20),
+                        ),
                       ),
                     ),
                   ],
@@ -139,6 +159,29 @@ class _ForumPageState extends State<ForumPage> {
             ),
           ),
           const Divider(),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 4),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFFFFC0CB),
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                ),
+                icon: const Icon(Icons.person),
+                label: const Text("Gönderilerim"),
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (context) => MyForumPostsPage()),
+                  );
+                },
+              ),
+            ),
+          ),
           Expanded(
             child: StreamBuilder<QuerySnapshot>(
               stream: _firestore
@@ -153,7 +196,12 @@ class _ForumPageState extends State<ForumPage> {
                 final posts = snapshot.data!.docs;
 
                 if (posts.isEmpty) {
-                  return const Center(child: Text('Henüz soru yok.'));
+                  return const Center(
+                    child: Text(
+                      'Henüz soru yok.',
+                      style: TextStyle(color: Colors.grey),
+                    ),
+                  );
                 }
 
                 return ListView.builder(
@@ -169,28 +217,41 @@ class _ForumPageState extends State<ForumPage> {
                     return FutureBuilder<DocumentSnapshot>(
                       future: _firestore.collection('users').doc(userId).get(),
                       builder: (context, userSnapshot) {
-                        if (userSnapshot.connectionState == ConnectionState.waiting) {
+                        if (userSnapshot.connectionState == ConnectionState
+                            .waiting) {
                           return const ListTile(
-                            leading: CircleAvatar(child: CircularProgressIndicator()),
+                            leading: CircleAvatar(
+                                child: CircularProgressIndicator()),
                             title: Text('Yükleniyor...'),
                           );
                         }
 
-                        if (!userSnapshot.hasData || !userSnapshot.data!.exists) {
+                        if (!userSnapshot.hasData || !userSnapshot.data!
+                            .exists) {
                           return ListTile(
-                            leading: const CircleAvatar(child: Icon(Icons.person)),
+                            leading: const CircleAvatar(
+                                child: Icon(Icons.person)),
                             title: Text('Kullanıcı bilgisi bulunamadı'),
                             subtitle: Text(question),
                           );
                         }
 
-                        final userData = userSnapshot.data!.data() as Map<String, dynamic>;
+                        final userData = userSnapshot.data!.data() as Map<
+                            String,
+                            dynamic>;
                         final String username = userData['name'] ?? 'Kullanıcı';
-                        final String photoUrl = userData['photoUrl'] ?? '';
+                        final String photoUrl = userData['photoURL'] ?? '';
 
                         return Card(
-                          margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                          color: Colors.white,
+                          elevation: 2,
+                          margin: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 6),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(16),
+                            side: const BorderSide(
+                                color: Color(0xFFFFC0CB), width: 1),
+                          ),
                           child: Padding(
                             padding: const EdgeInsets.all(12),
                             child: Column(
@@ -207,20 +268,31 @@ class _ForumPageState extends State<ForumPage> {
                                           : null,
                                     ),
                                     const SizedBox(width: 8),
-                                    Text(username, style: const TextStyle(fontWeight: FontWeight.bold)),
+                                    Text(
+                                      username,
+                                      style: const TextStyle(
+                                          fontWeight: FontWeight.bold),
+                                    ),
                                     const Spacer(),
                                     Text(
                                       _formatTimestamp(timestamp),
-                                      style: const TextStyle(fontSize: 12, color: Colors.grey),
+                                      style: const TextStyle(
+                                          fontSize: 12, color: Colors.grey),
                                     ),
                                   ],
                                 ),
                                 const SizedBox(height: 8),
-                                Text(question),
+                                Text(
+                                  question,
+                                  style: const TextStyle(fontSize: 15),
+                                ),
                                 if (imageUrl.isNotEmpty)
                                   Padding(
                                     padding: const EdgeInsets.only(top: 8.0),
-                                    child: Image.network(imageUrl),
+                                    child: ClipRRect(
+                                      borderRadius: BorderRadius.circular(10),
+                                      child: Image.network(imageUrl),
+                                    ),
                                   ),
                                 const SizedBox(height: 8),
                                 _CommentSection(postId: postDoc.id),
@@ -240,7 +312,6 @@ class _ForumPageState extends State<ForumPage> {
     );
   }
 }
-
 class _CommentSection extends StatefulWidget {
   final String postId;
   const _CommentSection({required this.postId, Key? key}) : super(key: key);
@@ -260,6 +331,7 @@ class _CommentSectionState extends State<_CommentSection> {
     final commentText = _commentController.text.trim();
     if (commentText.isEmpty) return;
 
+    // Yorum ekle
     await _firestore
         .collection('forumPosts')
         .doc(widget.postId)
@@ -271,7 +343,26 @@ class _CommentSectionState extends State<_CommentSection> {
     });
 
     _commentController.clear();
+
+    // Bildirim için postun sahibini al
+    final postSnapshot = await _firestore.collection('forumPosts').doc(widget.postId).get();
+    final postOwnerId = postSnapshot['userId'];
+
+    // Kendi kendine bildirim gönderme
+    if (postOwnerId != user.uid) {
+      await _firestore.collection('notifications').add({
+        'toUserId': postOwnerId,
+        'senderId': user.uid,
+        'senderName': FirebaseAuth.instance.currentUser!.displayName ?? '',
+        'content': commentText,
+        'timestamp': FieldValue.serverTimestamp(),
+        'type': 'comment',
+        'relatedId': widget.postId,
+        'isRead': false,
+      });
+    }
   }
+
 
   @override
   Widget build(BuildContext context) {
@@ -320,7 +411,7 @@ class _CommentSectionState extends State<_CommentSection> {
 
                     final userData = userSnapshot.data!.data() as Map<String, dynamic>;
                     final String username = userData['name'] ?? 'Kullanıcı';
-                    final String photoUrl = userData['photoUrl'] ?? '';
+                    final String photoUrl = userData['photoURL'] ?? '';
 
                     return ListTile(
                       leading: CircleAvatar(
@@ -370,6 +461,7 @@ class _CommentSectionState extends State<_CommentSection> {
       ],
     );
   }
+
 
   String _formatTimestamp(Timestamp? timestamp) {
     if (timestamp == null) return '';
