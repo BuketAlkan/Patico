@@ -9,10 +9,9 @@ import 'package:http/http.dart' as http;
 class NotificationService {
   static final FirebaseMessaging _messaging = FirebaseMessaging.instance;
 
-  // 1. Arka plan handler'ı @pragma ile işaretle
+  // Arka plan handler'ı
   @pragma('vm:entry-point')
   static Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
-    // 2. Firebase'i mutlaka başlat
     await Firebase.initializeApp();
     await _processNotification(message.data);
   }
@@ -20,31 +19,68 @@ class NotificationService {
   static Future<void> _processNotification(Map<String, dynamic> data) async {
     debugPrint('📬 Bildirim Verisi: $data');
 
-    // 3. Eksik veri kontrolü
+    // Tüm bildirim türleri için ortak işleme
     final toUserId = data['toUserId'];
-    if (toUserId == null || toUserId.isEmpty) {
-      debugPrint('❌ Hata: toUserId eksik!');
-      return;
-    }
+    if (toUserId == null || toUserId.isEmpty) return;
 
     try {
-      // 4. Firestore kaydı için doküman referansı oluştur
-      final notificationRef = FirebaseFirestore.instance
-          .collection('notifications')
-          .doc();
+      final notificationRef = FirebaseFirestore.instance.collection('notifications').doc();
 
-      // 5. Firestore'a kaydet
-      await notificationRef.set({
+      // Tüm bildirim türleri için ortak alanlar
+      final notificationData = {
         'id': notificationRef.id,
         'toUserId': toUserId,
-        'senderName': data['senderName'] ?? 'Bilinmiyor',
-        'content': data['content'] ?? data['body'] ?? '',
-        'relatedId': data['chatId'] ?? data['postId'] ?? data['relatedId'] ?? '',
-        'type': data['type'] ?? 'genel',
         'isRead': false,
         'timestamp': FieldValue.serverTimestamp(),
-      });
+      };
 
+      // Bildirim tipine göre özelleştirme
+      switch (data['type']) {
+        case 'chat':
+          notificationData.addAll({
+            'senderName': data['senderName'] ?? 'Bilinmiyor',
+            'content': data['content'] ?? '',
+            'chatId': data['chatId'] ?? '',
+            'type': 'chat',
+          });
+          break;
+
+        case 'forum_comment':
+          notificationData.addAll({
+            'senderName': data['senderName'] ?? 'Bilinmiyor',
+            'content': data['content'] ?? '',
+            'postId': data['postId'] ?? '',
+            'type': 'forum_comment',
+          });
+          break;
+
+        case 'comment':
+          notificationData.addAll({
+            'senderName': data['senderName'] ?? 'Bilinmiyor',
+            'content': data['content'] ?? '',
+            'relatedId': data['relatedId'] ?? '',
+            'type': 'comment',
+          });
+          break;
+
+        case 'request_sent':
+        case 'request_accepted':
+        case 'request_rejected':
+          notificationData.addAll({
+            'senderName': data['senderName'] ?? 'Bilinmiyor',
+            'content': data['content'] ?? '',
+            'relatedId': data['relatedId'] ?? '',
+            'status': data['status'] ?? '',
+            'type': data['type'],
+          });
+          break;
+
+        default:
+          debugPrint('⚠️ Bilinmeyen bildirim tipi: ${data['type']}');
+          return;
+      }
+
+      await notificationRef.set(notificationData);
       debugPrint('✅ Firestore kaydı başarılı! ID: ${notificationRef.id}');
     } catch (e) {
       debugPrint('🔥 Firestore kayıt hatası: $e');
@@ -53,7 +89,6 @@ class NotificationService {
 
   static Future<void> initialize() async {
     try {
-      // 6. FCM Token'ını güncelle
       final token = await _messaging.getToken();
       debugPrint('🆕 FCM Token: $token');
 
@@ -65,66 +100,23 @@ class NotificationService {
             .set({'fcmToken': token}, SetOptions(merge: true));
       }
 
-      // 7. İzin iste
-      final settings = await _messaging.requestPermission(
-        alert: true,
-        badge: true,
-        sound: true,
-        provisional: true,
-      );
-
-      debugPrint('🔔 Bildirim izni durumu: ${settings.authorizationStatus}');
-
-      // 8. Arka plan handler'ını ayarla
+      // İzin ve dinleyiciler
+      await _messaging.requestPermission(alert: true, badge: true, sound: true);
       FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
+      FirebaseMessaging.onMessage.listen((m) => _processNotification(m.data));
+      FirebaseMessaging.onMessageOpenedApp.listen((m) => _processNotification(m.data));
 
-      // 9. Ön plan dinleyicisi
-      FirebaseMessaging.onMessage.listen((RemoteMessage message) async {
-        debugPrint('📥 Ön Planda Bildirim: ${message.data}');
-        await _processNotification(message.data);
-      });
-
-      // 10. Uygulama kapalıyken açılan bildirimler
-      FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
-        debugPrint('🚀 Kapalıyken açılan bildirim: ${message.data}');
-        _processNotification(message.data);
-      });
-
-      // 11. İlk açılışta gelen bildirimi yakala
       final initialMessage = await _messaging.getInitialMessage();
-      if (initialMessage != null) {
-        debugPrint('🚀 İlk açılış bildirimi: ${initialMessage.data}');
-        _processNotification(initialMessage.data);
-      }
+      if (initialMessage != null) _processNotification(initialMessage.data);
 
     } catch (e) {
       debugPrint('🔥 Bildirim servisi başlatma hatası: $e');
     }
   }
 
-  static Future<void> _sendToServer(Map<String, dynamic> data) async {
-    const url = 'https://fcm-notification-server-sku2.onrender.com/sendNotification';
-    try {
-      final response = await http.post(
-        Uri.parse(url),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode(data),
-      );
-
-      if (response.statusCode == 200) {
-        debugPrint('✅ Bildirim sunucuya gönderildi');
-      } else {
-        debugPrint('❌ Sunucu hatası: ${response.statusCode} - ${response.body}');
-      }
-    } catch (e) {
-      debugPrint('🌐 Ağ hatası: $e');
-    }
-  }
-
-  static Future<void> _sendToServerWithTokenLookup({
+  // Tüm bildirim türleri için ortak gönderim fonksiyonu
+  static Future<void> _sendNotification({
     required String toUserId,
-    required String title,
-    required String body,
     required String type,
     required Map<String, dynamic> data,
   }) async {
@@ -135,7 +127,6 @@ class NotificationService {
           .get();
 
       final token = userDoc.data()?['fcmToken'] as String?;
-
       if (token == null || token.isEmpty) {
         debugPrint('📭 Kullanıcının FCM token\'ı bulunamadı: $toUserId');
         return;
@@ -145,82 +136,110 @@ class NotificationService {
         'token': token,
         'data': {
           ...data,
-          'title': title,
-          'body': body,
           'toUserId': toUserId,
           'type': type,
         }
       };
 
-      debugPrint('📤 Gönderilen payload: ${jsonEncode(payload)}');
-      await _sendToServer(payload);
+      const url = 'https://fcm-notification-server-sku2.onrender.com/sendNotification';
+      final response = await http.post(
+        Uri.parse(url),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode(payload),
+      );
+
+      if (response.statusCode != 200) {
+        debugPrint('❌ Sunucu hatası: ${response.statusCode} - ${response.body}');
+      }
     } catch (e) {
-      debugPrint('🔑 Token alma hatası: $e');
+      debugPrint('🌐 Bildirim gönderme hatası: $e');
     }
   }
 
-// Mesaj bildirimi gönder
+  // 1. Mesaj bildirimi
   static Future<void> sendMessageNotification({
     required String toUserId,
     required String chatId,
     required String senderName,
     required String messageContent,
   }) async {
-    await _sendToServerWithTokenLookup(
+    await _sendNotification(
       toUserId: toUserId,
-      title: senderName,
-      body: messageContent,
       type: 'chat',
       data: {
         'senderName': senderName,
         'content': messageContent,
         'chatId': chatId,
-        // Ek bilgiler
-        'notificationType': 'message',
       },
     );
   }
 
-// Forum yorumu bildirimi gönder
+  // 2. Forum yorumu bildirimi
   static Future<void> sendForumReplyNotification({
     required String toUserId,
     required String postId,
     required String replierName,
-    required String commentText,
+    required String question,
   }) async {
-    await _sendToServerWithTokenLookup(
+    await _sendNotification(
       toUserId: toUserId,
-      title: '$replierName gönderine yorum yaptı',
-      body: commentText,
       type: 'forum_comment',
       data: {
         'senderName': replierName,
-        'content': commentText,
+        'content': question,
         'postId': postId,
-        // Ek bilgiler
-        'notificationType': 'forum_reply',
       },
     );
   }
 
-// Genel yorum bildirimi gönder
+  // 3. Genel yorum bildirimi
   static Future<void> sendCommentNotification({
     required String toUserId,
     required String relatedId,
     required String commenterName,
     required String commentText,
   }) async {
-    await _sendToServerWithTokenLookup(
+    await _sendNotification(
       toUserId: toUserId,
-      title: '$commenterName yorum yaptı',
-      body: commentText,
       type: 'comment',
       data: {
         'senderName': commenterName,
         'content': commentText,
         'relatedId': relatedId,
-        // Ek bilgiler
-        'notificationType': 'comment',
+      },
+    );
+  }
+
+  // 4. Talep durum bildirimi
+  static Future<void> sendRequestStatusNotification({
+    required String toUserId,
+    required String senderName,
+    required String relatedId,
+    required String status,
+  }) async {
+    String content;
+    switch (status) {
+      case 'sent':
+        content = '$senderName ilanınıza talep gönderdi';
+        break;
+      case 'accepted':
+        content = '$senderName talebinizi kabul etti';
+        break;
+      case 'rejected':
+        content = '$senderName talebinizi reddetti';
+        break;
+      default:
+        content = 'Talep durumu güncellendi';
+    }
+
+    await _sendNotification(
+      toUserId: toUserId,
+      type: 'request_$status', // request_sent, request_accepted, request_rejected
+      data: {
+        'senderName': senderName,
+        'content': content,
+        'relatedId': relatedId,
+        'status': status,
       },
     );
   }

@@ -68,12 +68,8 @@ class _SettingsPageState extends State<SettingsPage> {
             title: 'Kullanıcı Adı Değiştir',
             onTap: _changeUsername,
           ),
-          SwitchListTile(
-            title: const Text('Bildirimlere İzin Ver'),
-            value: _notificationsEnabled,
-            onChanged: (value) => setState(() => _notificationsEnabled = value),
-            secondary: const Icon(Icons.notifications),
-          ),
+
+
           _buildSettingItem(
             icon: Icons.delete,
             title: 'Hesabı Sil',

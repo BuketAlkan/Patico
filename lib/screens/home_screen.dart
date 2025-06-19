@@ -24,6 +24,7 @@ import 'package:patico/widget/custom_bottom_navbar.dart';
 import 'package:smooth_page_indicator/smooth_page_indicator.dart';
 
 import '../widget/VetMapWidget.dart';
+import 'request_page.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({Key? key}) : super(key: key);
@@ -310,14 +311,15 @@ class _HomePageState extends State<HomePage> {
         currentIndex: _currentIndex,
         onTap: (index) => setState(() => _currentIndex = index),
       ),
-      floatingActionButton: FloatingActionButton(
+      floatingActionButton: FloatingActionButton.extended(
         heroTag: 'uniqueTag1',
         backgroundColor: AppColor.primary,
         onPressed: () => Navigator.push(
           context,
-          MaterialPageRoute(builder: (context) =>  CreateAdPage()),
+          MaterialPageRoute(builder: (context) => CreateAdPage()),
         ),
-        child: const Icon(Icons.add, size: 30, color: Colors.white), // child doğru parametre
+        icon: const Icon(Icons.post_add, size: 20, color: Colors.white),
+        label: const Text(' İlanEkle', style: TextStyle(fontSize: 14, color: Colors.white)),
       ),
     );
   }
@@ -369,6 +371,15 @@ class _HomePageState extends State<HomePage> {
               _buildDrawerItem(Icons.access_alarm_rounded, "Hatırlatıcı", () {
                 Navigator.push(context, MaterialPageRoute(builder: (context) => ReminderListPage()));
               }),
+          _buildDrawerItem(Icons.add_circle, "Gelen Taleplerim", () {
+          final currentUserId = FirebaseAuth.instance.currentUser!.uid;
+          Navigator.push(
+          context,
+          MaterialPageRoute(
+          builder: (context) => RequestsPage(),
+          ),
+          );
+          }),
               const Spacer(),
               const Divider(),
               _buildDrawerItem(Icons.logout, "Çıkış Yap", () async {

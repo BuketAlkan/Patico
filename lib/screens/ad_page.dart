@@ -98,8 +98,11 @@ class _CreateAdPageState extends ConsumerState<CreateAdPage> {
       'imageUrl': imageUrl,
       'createdAt': Timestamp.now(),
       'species': _selectedSpecies,
-      'city': userCity,// Tür bilgisi kaydediliyor
+      'city': userCity,
+      'type': adType, //
+
     });
+
 
     await adRef.update({'adId': adRef.id});
 
